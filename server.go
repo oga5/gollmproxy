@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -58,6 +61,20 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 }
 
 func authMiddleware(next http.Handler, cfg *Config) http.Handler {
+	var (
+		failMu    sync.Mutex
+		failCount = make(map[string]int)
+	)
+
+	// Clean up stale entries every 5 minutes
+	go func() {
+		for range time.Tick(5 * time.Minute) {
+			failMu.Lock()
+			clear(failCount)
+			failMu.Unlock()
+		}
+	}()
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip auth for health check
 		if r.URL.Path == "/health" {
@@ -75,8 +92,25 @@ func authMiddleware(next http.Handler, cfg *Config) http.Handler {
 		// Support "Bearer <key>" format
 		key = strings.TrimPrefix(key, "Bearer ")
 
-		if key != cfg.MasterKey {
-			writeErrorJSON(w, http.StatusUnauthorized, "invalid api key", "authentication_error")
+		if subtle.ConstantTimeCompare([]byte(key), []byte(cfg.MasterKey)) == 1 {
+			// Valid key — reset failure count and proceed
+			clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+			failMu.Lock()
+			delete(failCount, clientIP)
+			failMu.Unlock()
+		} else {
+			// Invalid key — check rate limit then reject
+			clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+			failMu.Lock()
+			failCount[clientIP]++
+			count := failCount[clientIP]
+			failMu.Unlock()
+			if count > 10 {
+				w.Header().Set("Retry-After", "300")
+				writeErrorJSON(w, http.StatusTooManyRequests, "too many authentication failures", "rate_limit_error")
+			} else {
+				writeErrorJSON(w, http.StatusUnauthorized, "invalid api key", "authentication_error")
+			}
 			return
 		}
 
