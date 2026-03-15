@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -60,18 +61,33 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+const (
+	authMaxFailures      = 10
+	authLockoutDuration  = 5 * time.Minute
+)
+
+type lockoutEntry struct {
+	count    int
+	lockedAt time.Time
+}
+
 func authMiddleware(next http.Handler, cfg *Config) http.Handler {
 	var (
-		failMu    sync.Mutex
-		failCount = make(map[string]int)
+		mu       sync.Mutex
+		lockouts = make(map[string]*lockoutEntry)
 	)
 
-	// Clean up stale entries every 5 minutes
+	// Clean up expired entries every 5 minutes
 	go func() {
 		for range time.Tick(5 * time.Minute) {
-			failMu.Lock()
-			clear(failCount)
-			failMu.Unlock()
+			now := time.Now()
+			mu.Lock()
+			for ip, e := range lockouts {
+				if e.count >= authMaxFailures && now.Sub(e.lockedAt) >= authLockoutDuration {
+					delete(lockouts, ip)
+				}
+			}
+			mu.Unlock()
 		}
 	}()
 
@@ -82,6 +98,25 @@ func authMiddleware(next http.Handler, cfg *Config) http.Handler {
 			return
 		}
 
+		clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+
+		// Check lockout before doing any work
+		mu.Lock()
+		e := lockouts[clientIP]
+		if e != nil && e.count >= authMaxFailures {
+			if time.Since(e.lockedAt) < authLockoutDuration {
+				mu.Unlock()
+				remaining := authLockoutDuration - time.Since(e.lockedAt)
+				w.Header().Set("Retry-After", fmt.Sprintf("%d", int(remaining.Seconds())))
+				writeErrorJSON(w, http.StatusTooManyRequests, "too many authentication failures, try again later", "rate_limit_error")
+				return
+			}
+			// Lockout expired — reset
+			delete(lockouts, clientIP)
+			e = nil
+		}
+		mu.Unlock()
+
 		// Determine which header to check
 		headerName := cfg.KeyHeaderName
 		if headerName == "" {
@@ -89,32 +124,29 @@ func authMiddleware(next http.Handler, cfg *Config) http.Handler {
 		}
 
 		key := r.Header.Get(headerName)
-		// Support "Bearer <key>" format
 		key = strings.TrimPrefix(key, "Bearer ")
 
 		if subtle.ConstantTimeCompare([]byte(key), []byte(cfg.MasterKey)) == 1 {
-			// Valid key — reset failure count and proceed
-			clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
-			failMu.Lock()
-			delete(failCount, clientIP)
-			failMu.Unlock()
-		} else {
-			// Invalid key — check rate limit then reject
-			clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
-			failMu.Lock()
-			failCount[clientIP]++
-			count := failCount[clientIP]
-			failMu.Unlock()
-			if count > 10 {
-				w.Header().Set("Retry-After", "300")
-				writeErrorJSON(w, http.StatusTooManyRequests, "too many authentication failures", "rate_limit_error")
-			} else {
-				writeErrorJSON(w, http.StatusUnauthorized, "invalid api key", "authentication_error")
-			}
+			// Valid key — clear failure record
+			mu.Lock()
+			delete(lockouts, clientIP)
+			mu.Unlock()
+			next.ServeHTTP(w, r)
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		// Invalid key — record failure
+		mu.Lock()
+		if lockouts[clientIP] == nil {
+			lockouts[clientIP] = &lockoutEntry{}
+		}
+		lockouts[clientIP].count++
+		if lockouts[clientIP].count >= authMaxFailures {
+			lockouts[clientIP].lockedAt = time.Now()
+		}
+		mu.Unlock()
+
+		writeErrorJSON(w, http.StatusUnauthorized, "invalid api key", "authentication_error")
 	})
 }
 
