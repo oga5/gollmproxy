@@ -1,0 +1,32 @@
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  litellm_key_header_name: X-Litellm-Api-Key
+
+model_list:
+  - model_name: gemini-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+  - model_name: gemini-2.5-flash-lite-preview-09-2025
+    litellm_params:
+      model: gemini/gemini-2.5-flash-lite-preview-09-2025
+      api_key: os.environ/GEMINI_API_KEY
+  - model_name: gemini-3.1-flash-lite-preview
+    litellm_params:
+      model: gemini/gemini-3.1-flash-lite-preview
+      api_key: os.environ/GEMINI_API_KEY
+  - model_name: gemini-thinking
+    litellm_params:
+      model: gemini/gemini-3-flash-preview
+      api_key: os.environ/GEMINI_API_KEY
+
+search_tools:
+  - search_tool_name: tavily-search
+    litellm_params:
+      search_provider: tavily
+      api_key: os.environ/TAVILY_API_KEY
+
+# Google AI Studio passthrough (for Google Grounding)
+google_ai_studio_passthrough:
+  api_key: os.environ/GEMINI_API_KEY
+

@@ -1,13 +1,21 @@
-# gollmproxy configuration
-port: 8080
-log_file: "gollmproxy.log"
+# gollmproxy configuration (LiteLLM compatible format)
 
-# API keys (environment variables take precedence)
-# openai_api_key: "sk-..."
-# gemini_api_key: "AIza..."
-# tavily_api_key: "tvly-..."
+model_list:
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+      api_base: https://api.openai.com
+  - model_name: gemini-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
 
-# Custom base URLs (optional)
-# openai_base_url: "https://api.openai.com"
-# gemini_base_url: "https://generativelanguage.googleapis.com"
-# tavily_base_url: "https://api.tavily.com"
+environment_variables:
+  # OPENAI_API_KEY: "sk-..."
+  # GEMINI_API_KEY: "AIza..."
+  # TAVILY_API_KEY: "tvly-..."
+
+general_settings:
+  port: 8080
+  log_file: "gollmproxy.log"

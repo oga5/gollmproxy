@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,12 +30,15 @@ func NewServer(cfg *Config, logger *RequestLogger) http.Handler {
 	// Pass-through routes
 	registerPassthroughRoutes(mux, cfg)
 
-	return applyMiddleware(mux, logger)
+	return applyMiddleware(mux, cfg, logger)
 }
 
-func applyMiddleware(handler http.Handler, logger *RequestLogger) http.Handler {
-	// Order: recovery -> requestID -> logging -> handler
+func applyMiddleware(handler http.Handler, cfg *Config, logger *RequestLogger) http.Handler {
+	// Order: recovery -> requestID -> logging -> auth -> handler
 	h := handler
+	if cfg.MasterKey != "" {
+		h = authMiddleware(h, cfg)
+	}
 	h = loggingMiddleware(h, logger)
 	h = requestIDMiddleware(h)
 	h = recoveryMiddleware(h)
@@ -49,6 +53,33 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 				http.Error(w, `{"error":{"message":"internal server error","type":"server_error"}}`, http.StatusInternalServerError)
 			}
 		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func authMiddleware(next http.Handler, cfg *Config) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip auth for health check
+		if r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Determine which header to check
+		headerName := cfg.KeyHeaderName
+		if headerName == "" {
+			headerName = "Authorization"
+		}
+
+		key := r.Header.Get(headerName)
+		// Support "Bearer <key>" format
+		key = strings.TrimPrefix(key, "Bearer ")
+
+		if key != cfg.MasterKey {
+			writeErrorJSON(w, http.StatusUnauthorized, "invalid api key", "authentication_error")
+			return
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }
