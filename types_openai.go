@@ -11,6 +11,8 @@ type OpenAIChatRequest struct {
 	Stream      bool            `json:"stream,omitempty"`
 	Stop        []string        `json:"stop,omitempty"`
 	N           *int            `json:"n,omitempty"`
+	User        string          `json:"user,omitempty"`
+	Metadata    map[string]any  `json:"metadata,omitempty"`
 }
 
 type OpenAIMessage struct {

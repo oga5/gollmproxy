@@ -8,19 +8,24 @@ import (
 )
 
 type LogEntry struct {
-	Timestamp  string `json:"timestamp"`
-	RequestID  string `json:"request_id"`
-	Method     string `json:"method"`
-	Path       string `json:"path"`
-	Provider   string `json:"provider,omitempty"`
-	Model      string `json:"model,omitempty"`
-	Stream     bool   `json:"stream,omitempty"`
-	StatusCode int    `json:"status_code"`
-	LatencyMs  int64  `json:"latency_ms"`
-	ReqBody    string `json:"req_body,omitempty"`
-	RespBody   string `json:"resp_body,omitempty"`
-	Error      string `json:"error,omitempty"`
-	ClientIP   string `json:"client_ip,omitempty"`
+	Timestamp        string         `json:"timestamp"`
+	RequestID        string         `json:"request_id"`
+	Method           string         `json:"method"`
+	Path             string         `json:"path"`
+	User             string         `json:"user,omitempty"`
+	Metadata         map[string]any `json:"metadata,omitempty"`
+	Model            string         `json:"model,omitempty"`
+	Provider         string         `json:"provider,omitempty"`
+	Stream           bool           `json:"stream,omitempty"`
+	StatusCode       int            `json:"status_code"`
+	LatencyMs        int64          `json:"latency_ms"`
+	PromptTokens     int            `json:"prompt_tokens,omitempty"`
+	CompletionTokens int            `json:"completion_tokens,omitempty"`
+	TotalTokens      int            `json:"total_tokens,omitempty"`
+	ReqBody          string         `json:"req_body,omitempty"`
+	RespBody         string         `json:"resp_body,omitempty"`
+	Error            string         `json:"error,omitempty"`
+	ClientIP         string         `json:"client_ip,omitempty"`
 }
 
 const maxBodyLogSize = 10 * 1024 // 10KB

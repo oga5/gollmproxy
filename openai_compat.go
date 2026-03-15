@@ -109,7 +109,7 @@ func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 		if err != nil {
 			slog.Error("streaming error", "error", err)
 		}
-		logRequest(logger, reqID, r, "openai", model, true, resp.StatusCode, start, string(bodyBytes), accumulated)
+		logRequest(logger, cfg, reqID, r, "openai", model, true, resp.StatusCode, start, string(bodyBytes), accumulated, req.User, req.Metadata, nil)
 	} else {
 		// Non-streaming: read full response and forward
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
@@ -120,7 +120,14 @@ func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 		}
 		w.WriteHeader(resp.StatusCode)
 		w.Write(respBody)
-		logRequest(logger, reqID, r, "openai", model, false, resp.StatusCode, start, string(bodyBytes), string(respBody))
+
+		// Extract usage from OpenAI response
+		var usage *OpenAIUsage
+		var openaiResp OpenAIChatResponse
+		if json.Unmarshal(respBody, &openaiResp) == nil {
+			usage = openaiResp.Usage
+		}
+		logRequest(logger, cfg, reqID, r, "openai", model, false, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, req.Metadata, usage)
 	}
 }
 
@@ -183,18 +190,18 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 		slog.Error("gemini API error", "request_id", reqID, "status", resp.StatusCode, "body", string(respBody))
 		writeErrorJSON(w, resp.StatusCode, "gemini API error", "server_error")
-		logRequest(logger, reqID, r, "gemini", model, req.Stream, resp.StatusCode, start, string(bodyBytes), string(respBody))
+		logRequest(logger, cfg, reqID, r, "gemini", model, req.Stream, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, req.Metadata, nil)
 		return
 	}
 
 	if req.Stream {
-		handleGeminiStream(w, resp, model, reqID, logger, r, bodyBytes, start)
+		handleGeminiStream(w, resp, cfg, model, reqID, logger, r, bodyBytes, start, req.User, req.Metadata)
 	} else {
-		handleGeminiNonStream(w, resp, model, reqID, logger, r, bodyBytes, start)
+		handleGeminiNonStream(w, resp, cfg, model, reqID, logger, r, bodyBytes, start, req.User, req.Metadata)
 	}
 }
 
-func handleGeminiNonStream(w http.ResponseWriter, resp *http.Response, model, reqID string, logger *RequestLogger, r *http.Request, bodyBytes []byte, start time.Time) {
+func handleGeminiNonStream(w http.ResponseWriter, resp *http.Response, cfg *Config, model, reqID string, logger *RequestLogger, r *http.Request, bodyBytes []byte, start time.Time, user string, metadata map[string]any) {
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		writeErrorJSON(w, http.StatusBadGateway, "failed to read upstream response", "server_error")
@@ -214,10 +221,10 @@ func handleGeminiNonStream(w http.ResponseWriter, resp *http.Response, model, re
 	w.WriteHeader(http.StatusOK)
 	w.Write(openaiBody)
 
-	logRequest(logger, reqID, r, "gemini", model, false, http.StatusOK, start, string(bodyBytes), string(openaiBody))
+	logRequest(logger, cfg, reqID, r, "gemini", model, false, http.StatusOK, start, string(bodyBytes), string(openaiBody), user, metadata, openaiResp.Usage)
 }
 
-func handleGeminiStream(w http.ResponseWriter, resp *http.Response, model, reqID string, logger *RequestLogger, r *http.Request, bodyBytes []byte, start time.Time) {
+func handleGeminiStream(w http.ResponseWriter, resp *http.Response, cfg *Config, model, reqID string, logger *RequestLogger, r *http.Request, bodyBytes []byte, start time.Time, user string, metadata map[string]any) {
 	isFirst := true
 
 	transformLine := func(data []byte) ([]byte, error) {
@@ -244,22 +251,34 @@ func handleGeminiStream(w http.ResponseWriter, resp *http.Response, model, reqID
 		flusher.Flush()
 	}
 
-	logRequest(logger, reqID, r, "gemini", model, true, http.StatusOK, start, string(bodyBytes), accumulated)
+	logRequest(logger, cfg, reqID, r, "gemini", model, true, http.StatusOK, start, string(bodyBytes), accumulated, user, metadata, nil)
 }
 
-func logRequest(logger *RequestLogger, reqID string, r *http.Request, provider, model string, stream bool, statusCode int, start time.Time, reqBody, respBody string) {
-	logger.Log(LogEntry{
+func logRequest(logger *RequestLogger, cfg *Config, reqID string, r *http.Request, provider, model string, stream bool, statusCode int, start time.Time, reqBody, respBody string, user string, metadata map[string]any, usage *OpenAIUsage) {
+	entry := LogEntry{
 		Timestamp:  start.UTC().Format(time.RFC3339Nano),
 		RequestID:  reqID,
 		Method:     r.Method,
 		Path:       r.URL.Path,
+		User:       user,
+		Metadata:   metadata,
 		Provider:   provider,
 		Model:      model,
 		Stream:     stream,
 		StatusCode: statusCode,
 		LatencyMs:  time.Since(start).Milliseconds(),
-		ReqBody:    reqBody,
-		RespBody:   respBody,
 		ClientIP:   r.RemoteAddr,
-	})
+	}
+	if usage != nil {
+		entry.PromptTokens = usage.PromptTokens
+		entry.CompletionTokens = usage.CompletionTokens
+		entry.TotalTokens = usage.TotalTokens
+	}
+	if cfg.LogRequestBody {
+		entry.ReqBody = reqBody
+	}
+	if cfg.LogResponseBody {
+		entry.RespBody = respBody
+	}
+	logger.Log(entry)
 }

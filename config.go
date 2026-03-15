@@ -14,6 +14,9 @@ type Config struct {
 	Port    int
 	LogFile string
 
+	LogRequestBody  bool
+	LogResponseBody bool
+
 	MasterKey          string
 	KeyHeaderName      string
 	TrustedProxyHeader string
@@ -50,6 +53,8 @@ type litellmParams struct {
 type generalSettings struct {
 	Port               int    `yaml:"port"`
 	LogFile            string `yaml:"log_file"`
+	LogRequestBody     *bool  `yaml:"log_request_body"`
+	LogResponseBody    *bool  `yaml:"log_response_body"`
 	MasterKey          string `yaml:"master_key"`
 	KeyHeaderName      string `yaml:"litellm_key_header_name"`
 	TrustedProxyHeader string `yaml:"trusted_proxy_header"`
@@ -81,11 +86,13 @@ func LoadConfig() *Config {
 	var configFile string
 
 	cfg := &Config{
-		Port:          8080,
-		LogFile:       "gollmproxy.log",
-		OpenAIBaseURL: "https://api.openai.com",
-		GeminiBaseURL: "https://generativelanguage.googleapis.com",
-		TavilyBaseURL: "https://api.tavily.com",
+		Port:            8080,
+		LogFile:         "gollmproxy.log",
+		LogRequestBody:  true,
+		LogResponseBody: true,
+		OpenAIBaseURL:   "https://api.openai.com",
+		GeminiBaseURL:   "https://generativelanguage.googleapis.com",
+		TavilyBaseURL:   "https://api.tavily.com",
 	}
 
 	flag.StringVar(&configFile, "config", "", "config file path (YAML)")
@@ -180,6 +187,12 @@ func loadYAMLConfig(path string, cfg *Config) {
 	}
 	if lc.GeneralSettings.TrustedProxyHeader != "" {
 		cfg.TrustedProxyHeader = lc.GeneralSettings.TrustedProxyHeader
+	}
+	if lc.GeneralSettings.LogRequestBody != nil {
+		cfg.LogRequestBody = *lc.GeneralSettings.LogRequestBody
+	}
+	if lc.GeneralSettings.LogResponseBody != nil {
+		cfg.LogResponseBody = *lc.GeneralSettings.LogResponseBody
 	}
 
 	// Extract search tool config (e.g., Tavily)

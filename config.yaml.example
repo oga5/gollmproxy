@@ -19,3 +19,5 @@ environment_variables:
 general_settings:
   port: 8080
   log_file: "gollmproxy.log"
+  log_request_body: true
+  log_response_body: true
