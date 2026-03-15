@@ -1,4 +1,4 @@
-# gollmproxy configuration (LiteLLM compatible format)
+# gollmproxy configuration
 
 model_list:
   - model_name: gpt-4o

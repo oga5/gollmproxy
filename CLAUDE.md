@@ -29,7 +29,7 @@ convert_gemini_to_openai.go   Gemini → OpenAI レスポンス変換 (非スト
 types_openai.go               OpenAI API 型定義 (Request, Response, StreamChunk, Error)
 types_gemini.go               Gemini API 型定義 (Request, Response, UsageMetadata)
 stream.go                     SSE ストリーミングユーティリティ (proxySSEStream)
-config.yaml.example           設定ファイル例 (LiteLLM互換形式)
+config.yaml.example           設定ファイル例
 ```
 
 ## アーキテクチャ
@@ -91,7 +91,7 @@ recoveryMiddleware → requestIDMiddleware → loggingMiddleware → [authMiddle
 | Gemini | `?key=$GEMINI_API_KEY` クエリパラメータ |
 | Tavily | `Authorization: Bearer $TAVILY_API_KEY` ヘッダ |
 
-## 設定ファイル形式 (LiteLLM互換)
+## 設定ファイル形式
 
 ```yaml
 general_settings:
@@ -129,11 +129,11 @@ environment_variables:
 - `general_settings`: ポート・ログファイル・マスターキー認証設定
   - `master_key`: プロキシへのアクセスを制限するAPIキー（`os.environ/` 構文対応）
   - `litellm_key_header_name`: 認証ヘッダ名（未設定時は `Authorization`）
-- `model_list`: LiteLLM互換。`litellm_params.model` のプレフィックス (`openai/`, `gemini/`) でプロバイダ判定
+- `model_list`: `litellm_params.model` のプレフィックス (`openai/`, `gemini/`) でプロバイダ判定
 - `search_tools`: 検索ツール設定（Tavily等）。`search_provider` でプロバイダ判定
 - `google_ai_studio_passthrough`: Geminiパススルー用APIキー設定
 - `environment_variables`: YAMLからOS環境変数をセット（既存の環境変数が優先）
-- `os.environ/VARNAME`: LiteLLM互換の環境変数参照構文（api_key等で使用）
+- `os.environ/VARNAME`: 環境変数参照構文（api_key等で使用）
 
 ## 設定の優先順位
 

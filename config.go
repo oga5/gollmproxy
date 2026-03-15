@@ -29,12 +29,12 @@ type Config struct {
 	GeminiBaseURL string
 	TavilyBaseURL string
 
-	// ModelAliases maps model_name to litellm_params.model (e.g. "gemini-2.5-flash" -> "gemini/gemini-2.5-flash")
+	// ModelAliases maps model_name to the provider-prefixed model (e.g. "gemini-2.5-flash" -> "gemini/gemini-2.5-flash")
 	ModelAliases map[string]string
 }
 
-// LiteLLM-compatible YAML config types
-type litellmConfig struct {
+// YAML config types
+type yamlConfig struct {
 	ModelList                  []modelListEntry     `yaml:"model_list"`
 	GeneralSettings            generalSettings      `yaml:"general_settings"`
 	EnvironmentVariables       map[string]string    `yaml:"environment_variables"`
@@ -44,10 +44,10 @@ type litellmConfig struct {
 
 type modelListEntry struct {
 	ModelName     string        `yaml:"model_name"`
-	LiteLLMParams litellmParams `yaml:"litellm_params"`
+	Params modelParams `yaml:"litellm_params"`
 }
 
-type litellmParams struct {
+type modelParams struct {
 	Model   string `yaml:"model"`
 	APIKey  string `yaml:"api_key"`
 	APIBase string `yaml:"api_base"`
@@ -65,7 +65,7 @@ type generalSettings struct {
 
 type searchToolEntry struct {
 	SearchToolName string             `yaml:"search_tool_name"`
-	LiteLLMParams  searchToolParams   `yaml:"litellm_params"`
+	Params         searchToolParams   `yaml:"litellm_params"`
 }
 
 type searchToolParams struct {
@@ -151,7 +151,7 @@ func loadYAMLConfig(path string, cfg *Config) {
 		return
 	}
 
-	var lc litellmConfig
+	var lc yamlConfig
 	if err := yaml.Unmarshal(data, &lc); err != nil {
 		slog.Error("failed to parse config file", "path", path, "error", err)
 		return
@@ -189,8 +189,8 @@ func loadYAMLConfig(path string, cfg *Config) {
 
 	// Extract search tool config (e.g., Tavily)
 	for _, entry := range lc.SearchTools {
-		apiKey := resolveEnvRef(entry.LiteLLMParams.APIKey)
-		switch entry.LiteLLMParams.SearchProvider {
+		apiKey := resolveEnvRef(entry.Params.APIKey)
+		switch entry.Params.SearchProvider {
 		case "tavily":
 			if cfg.TavilyAPIKey == "" && apiKey != "" {
 				cfg.TavilyAPIKey = apiKey
@@ -208,11 +208,11 @@ func loadYAMLConfig(path string, cfg *Config) {
 		cfg.ModelAliases = make(map[string]string)
 	}
 	for _, entry := range lc.ModelList {
-		model := entry.LiteLLMParams.Model
-		apiKey := resolveEnvRef(entry.LiteLLMParams.APIKey)
-		apiBase := entry.LiteLLMParams.APIBase
+		model := entry.Params.Model
+		apiKey := resolveEnvRef(entry.Params.APIKey)
+		apiBase := entry.Params.APIBase
 
-		// Register model_name -> litellm_params.model alias
+		// Register model_name -> provider-prefixed model alias
 		if entry.ModelName != "" && model != "" {
 			cfg.ModelAliases[entry.ModelName] = model
 		}

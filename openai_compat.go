@@ -44,7 +44,7 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 			return
 		}
 
-		// Resolve model alias (model_name -> litellm_params.model)
+		// Resolve model alias (model_name -> provider-prefixed model)
 		modelField := req.Model
 		if mapped, ok := cfg.ModelAliases[modelField]; ok {
 			modelField = mapped
