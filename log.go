@@ -28,6 +28,13 @@ type LogEntry struct {
 	ClientIP         string         `json:"client_ip,omitempty"`
 }
 
+type ChunkLogEntry struct {
+	Timestamp  string `json:"timestamp"`
+	RequestID  string `json:"request_id"`
+	ChunkIndex int    `json:"chunk_index"`
+	Data       string `json:"data"`
+}
+
 const maxBodyLogSize = 10 * 1024 // 10KB
 
 type RequestLogger struct {
@@ -49,6 +56,23 @@ func (l *RequestLogger) Log(entry LogEntry) {
 	}
 	entry.ReqBody = truncate(entry.ReqBody, maxBodyLogSize)
 	entry.RespBody = truncate(entry.RespBody, maxBodyLogSize)
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	data = append(data, '\n')
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.file.Write(data)
+}
+
+func (l *RequestLogger) LogChunk(entry ChunkLogEntry) {
+	if entry.Timestamp == "" {
+		entry.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	entry.Data = truncate(entry.Data, maxBodyLogSize)
 
 	data, err := json.Marshal(entry)
 	if err != nil {

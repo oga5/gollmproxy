@@ -111,11 +111,20 @@ func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 	if req.Stream {
 		// Stream SSE response directly
 		setSSEHeaders(w)
-		accumulated, err := proxySSEStream(w, resp.Body, nil)
-		if err != nil {
+		var onChunk onChunkFunc
+		if cfg.LogResponseBody {
+			onChunk = func(index int, data []byte) {
+				logger.LogChunk(ChunkLogEntry{
+					RequestID:  reqID,
+					ChunkIndex: index,
+					Data:       string(data),
+				})
+			}
+		}
+		if err := proxySSEStream(w, resp.Body, nil, onChunk); err != nil {
 			slog.Error("streaming error", "error", err)
 		}
-		logRequest(logger, cfg, reqID, r, "openai", model, true, resp.StatusCode, start, string(bodyBytes), accumulated, req.User, req.Metadata, nil)
+		logRequest(logger, cfg, reqID, r, "openai", model, true, resp.StatusCode, start, string(bodyBytes), "", req.User, req.Metadata, nil)
 	} else {
 		// Non-streaming: read full response and forward
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
@@ -246,8 +255,17 @@ func handleGeminiStream(w http.ResponseWriter, resp *http.Response, cfg *Config,
 	}
 
 	setSSEHeaders(w)
-	accumulated, err := proxySSEStream(w, resp.Body, transformLine)
-	if err != nil {
+	var onChunk onChunkFunc
+	if cfg.LogResponseBody {
+		onChunk = func(index int, data []byte) {
+			logger.LogChunk(ChunkLogEntry{
+				RequestID:  reqID,
+				ChunkIndex: index,
+				Data:       string(data),
+			})
+		}
+	}
+	if err := proxySSEStream(w, resp.Body, transformLine, onChunk); err != nil {
 		slog.Error("gemini streaming error", "error", err)
 	}
 
@@ -257,7 +275,7 @@ func handleGeminiStream(w http.ResponseWriter, resp *http.Response, cfg *Config,
 		flusher.Flush()
 	}
 
-	logRequest(logger, cfg, reqID, r, "gemini", model, true, http.StatusOK, start, string(bodyBytes), accumulated, user, metadata, nil)
+	logRequest(logger, cfg, reqID, r, "gemini", model, true, http.StatusOK, start, string(bodyBytes), "", user, metadata, nil)
 }
 
 func logRequest(logger *RequestLogger, cfg *Config, reqID string, r *http.Request, provider, model string, stream bool, statusCode int, start time.Time, reqBody, respBody string, user string, metadata map[string]any, usage *OpenAIUsage) {
