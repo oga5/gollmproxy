@@ -141,17 +141,6 @@ func LoadConfig() *Config {
 		cfg.TavilyBaseURL = v
 	}
 
-	// Warn about missing API keys
-	if cfg.OpenAIAPIKey == "" {
-		slog.Warn("OPENAI_API_KEY not set")
-	}
-	if cfg.GeminiAPIKey == "" {
-		slog.Warn("GEMINI_API_KEY not set")
-	}
-	if cfg.TavilyAPIKey == "" {
-		slog.Warn("TAVILY_API_KEY not set")
-	}
-
 	return cfg
 }
 
