@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 )
 
 func main() {
@@ -22,7 +23,14 @@ func main() {
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	slog.Info("starting gollmproxy", "addr", addr, "logfile", cfg.LogFile)
 
-	if err := http.ListenAndServe(addr, handler); err != nil {
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      handler,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 10 * time.Minute, // long for streaming responses
+		IdleTimeout:  2 * time.Minute,
+	}
+	if err := srv.ListenAndServe(); err != nil {
 		slog.Error("server error", "error", err)
 		os.Exit(1)
 	}

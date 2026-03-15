@@ -69,7 +69,10 @@ const (
 type lockoutEntry struct {
 	count    int
 	lockedAt time.Time
+	lastSeen time.Time
 }
+
+const authEntryTTL = 30 * time.Minute
 
 func authMiddleware(next http.Handler, cfg *Config) http.Handler {
 	var (
@@ -77,13 +80,19 @@ func authMiddleware(next http.Handler, cfg *Config) http.Handler {
 		lockouts = make(map[string]*lockoutEntry)
 	)
 
-	// Clean up expired entries every 5 minutes
+	// Clean up expired/stale entries every 5 minutes
 	go func() {
 		for range time.Tick(5 * time.Minute) {
 			now := time.Now()
 			mu.Lock()
 			for ip, e := range lockouts {
+				// Remove locked-out entries past their lockout duration
 				if e.count >= authMaxFailures && now.Sub(e.lockedAt) >= authLockoutDuration {
+					delete(lockouts, ip)
+					continue
+				}
+				// Remove stale entries that haven't seen activity
+				if now.Sub(e.lastSeen) >= authEntryTTL {
 					delete(lockouts, ip)
 				}
 			}
@@ -98,7 +107,7 @@ func authMiddleware(next http.Handler, cfg *Config) http.Handler {
 			return
 		}
 
-		clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+		clientIP := getClientIP(r, cfg.TrustedProxyHeader)
 
 		// Check lockout before doing any work
 		mu.Lock()
@@ -136,13 +145,15 @@ func authMiddleware(next http.Handler, cfg *Config) http.Handler {
 		}
 
 		// Invalid key — record failure
+		now := time.Now()
 		mu.Lock()
 		if lockouts[clientIP] == nil {
 			lockouts[clientIP] = &lockoutEntry{}
 		}
 		lockouts[clientIP].count++
+		lockouts[clientIP].lastSeen = now
 		if lockouts[clientIP].count >= authMaxFailures {
-			lockouts[clientIP].lockedAt = time.Now()
+			lockouts[clientIP].lockedAt = now
 		}
 		mu.Unlock()
 
@@ -211,4 +222,19 @@ func (w *statusWriter) Flush() {
 func getRequestID(r *http.Request) string {
 	id, _ := r.Context().Value(requestIDKey).(string)
 	return id
+}
+
+// getClientIP extracts the client IP, optionally using a trusted proxy header.
+func getClientIP(r *http.Request, trustedHeader string) string {
+	if trustedHeader != "" {
+		if v := r.Header.Get(trustedHeader); v != "" {
+			// Take the first IP (leftmost = original client)
+			if ip, _, ok := strings.Cut(v, ","); ok {
+				return strings.TrimSpace(ip)
+			}
+			return strings.TrimSpace(v)
+		}
+	}
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	return ip
 }

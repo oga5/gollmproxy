@@ -14,8 +14,9 @@ type Config struct {
 	Port    int
 	LogFile string
 
-	MasterKey     string
-	KeyHeaderName string
+	MasterKey          string
+	KeyHeaderName      string
+	TrustedProxyHeader string
 
 	OpenAIAPIKey string
 	GeminiAPIKey string
@@ -47,10 +48,11 @@ type litellmParams struct {
 }
 
 type generalSettings struct {
-	Port              int    `yaml:"port"`
-	LogFile           string `yaml:"log_file"`
-	MasterKey         string `yaml:"master_key"`
-	KeyHeaderName     string `yaml:"litellm_key_header_name"`
+	Port               int    `yaml:"port"`
+	LogFile            string `yaml:"log_file"`
+	MasterKey          string `yaml:"master_key"`
+	KeyHeaderName      string `yaml:"litellm_key_header_name"`
+	TrustedProxyHeader string `yaml:"trusted_proxy_header"`
 }
 
 type searchToolEntry struct {
@@ -175,6 +177,9 @@ func loadYAMLConfig(path string, cfg *Config) {
 	}
 	if lc.GeneralSettings.KeyHeaderName != "" {
 		cfg.KeyHeaderName = lc.GeneralSettings.KeyHeaderName
+	}
+	if lc.GeneralSettings.TrustedProxyHeader != "" {
+		cfg.TrustedProxyHeader = lc.GeneralSettings.TrustedProxyHeader
 	}
 
 	// Extract search tool config (e.g., Tavily)

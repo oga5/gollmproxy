@@ -1,21 +1,30 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
+
+const maxPassthroughRequestSize = 10 << 20 // 10MB
+
+// httpClient is used for all upstream requests with sensible timeouts.
+var httpClient = &http.Client{
+	Timeout: 5 * time.Minute,
+}
 
 // forwardRequest forwards an HTTP request to targetURL.
 // modifyReq is called to inject auth headers/query params before sending.
 // Returns the upstream response status code.
 func forwardRequest(w http.ResponseWriter, r *http.Request, targetURL string, modifyReq func(*http.Request)) (int, error) {
-	// Read the original request body
+	// Read the original request body with size limit
+	r.Body = http.MaxBytesReader(w, r.Body, maxPassthroughRequestSize)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return 0, err
 	}
-	defer r.Body.Close()
 
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, strings.NewReader(string(body)))
 	if err != nil {
@@ -37,7 +46,7 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, targetURL string, mo
 		modifyReq(req)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -84,14 +93,10 @@ func isSSE(resp *http.Response) bool {
 func writeErrorJSON(w http.ResponseWriter, statusCode int, message, errType string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	io.WriteString(w, `{"error":{"message":"`+escapeJSON(message)+`","type":"`+errType+`"}}`)
-}
-
-func escapeJSON(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	s = strings.ReplaceAll(s, "\r", `\r`)
-	s = strings.ReplaceAll(s, "\t", `\t`)
-	return s
+	json.NewEncoder(w).Encode(map[string]any{
+		"error": map[string]string{
+			"message": message,
+			"type":    errType,
+		},
+	})
 }

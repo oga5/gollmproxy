@@ -7,8 +7,18 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
+)
+
+// validModelName allows alphanumeric, dots, hyphens, underscores, and colons.
+// Slashes are NOT allowed (provider prefix is already stripped).
+var validModelName = regexp.MustCompile(`^[a-zA-Z0-9._:-]+$`)
+
+const (
+	maxRequestSize  = 10 << 20 // 10MB
+	maxResponseSize = 64 << 20 // 64MB
 )
 
 func registerOpenAICompatRoutes(mux *http.ServeMux, cfg *Config, logger *RequestLogger) {
@@ -20,22 +30,27 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 		start := time.Now()
 		reqID := getRequestID(r)
 
-		// Read request body
+		// Read request body with size limit
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestSize)
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, "failed to read request body", "invalid_request_error")
+			writeErrorJSON(w, http.StatusRequestEntityTooLarge, "request body too large", "invalid_request_error")
 			return
 		}
-		defer r.Body.Close()
 
 		var req OpenAIChatRequest
 		if err := json.Unmarshal(bodyBytes, &req); err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, "invalid request body: "+err.Error(), "invalid_request_error")
+			writeErrorJSON(w, http.StatusBadRequest, "invalid JSON in request body", "invalid_request_error")
 			return
 		}
 
 		// Parse provider prefix
 		provider, model := parseModelPrefix(req.Model)
+
+		if !validModelName.MatchString(model) {
+			writeErrorJSON(w, http.StatusBadRequest, "invalid model name", "invalid_request_error")
+			return
+		}
 
 		slog.Info("chat completions", "request_id", reqID, "provider", provider, "model", model, "stream", req.Stream)
 
@@ -79,9 +94,10 @@ func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 	upstreamReq.Header.Set("Content-Type", "application/json")
 	upstreamReq.Header.Set("Authorization", "Bearer "+cfg.OpenAIAPIKey)
 
-	resp, err := http.DefaultClient.Do(upstreamReq)
+	resp, err := httpClient.Do(upstreamReq)
 	if err != nil {
-		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed: "+err.Error(), "server_error")
+		slog.Error("openai upstream error", "request_id", reqID, "error", err)
+		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
 		return
 	}
 	defer resp.Body.Close()
@@ -96,7 +112,7 @@ func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 		logRequest(logger, reqID, r, "openai", model, true, resp.StatusCode, start, string(bodyBytes), accumulated)
 	} else {
 		// Non-streaming: read full response and forward
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 		for k, vs := range resp.Header {
 			for _, v := range vs {
 				w.Header().Add(k, v)
@@ -154,17 +170,19 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 	}
 	upstreamReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(upstreamReq)
+	resp, err := httpClient.Do(upstreamReq)
 	if err != nil {
-		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed: "+err.Error(), "server_error")
+		slog.Error("gemini upstream error", "request_id", reqID, "error", err)
+		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
 		return
 	}
 	defer resp.Body.Close()
 
-	// If upstream returned error, forward it
+	// If upstream returned error, log details server-side, return generic message to client
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		writeErrorJSON(w, resp.StatusCode, fmt.Sprintf("gemini API error: %s", string(respBody)), "server_error")
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+		slog.Error("gemini API error", "request_id", reqID, "status", resp.StatusCode, "body", string(respBody))
+		writeErrorJSON(w, resp.StatusCode, "gemini API error", "server_error")
 		logRequest(logger, reqID, r, "gemini", model, req.Stream, resp.StatusCode, start, string(bodyBytes), string(respBody))
 		return
 	}
@@ -177,7 +195,7 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 }
 
 func handleGeminiNonStream(w http.ResponseWriter, resp *http.Response, model, reqID string, logger *RequestLogger, r *http.Request, bodyBytes []byte, start time.Time) {
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		writeErrorJSON(w, http.StatusBadGateway, "failed to read upstream response", "server_error")
 		return

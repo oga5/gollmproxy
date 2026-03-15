@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 )
 
@@ -20,16 +21,19 @@ func handleOpenAIPassthrough(cfg *Config) http.HandlerFunc {
 			return
 		}
 
-		// Strip /openai prefix: /openai/v1/models -> /v1/models
-		path := strings.TrimPrefix(r.URL.Path, "/openai")
-		targetURL := cfg.OpenAIBaseURL + path
-		if r.URL.RawQuery != "" {
-			targetURL += "?" + r.URL.RawQuery
+		// Strip /openai prefix and sanitize: /openai/v1/models -> /v1/models
+		cleanPath := path.Clean(strings.TrimPrefix(r.URL.Path, "/openai"))
+		u, err := url.Parse(cfg.OpenAIBaseURL)
+		if err != nil {
+			writeErrorJSON(w, http.StatusInternalServerError, "invalid base URL", "server_error")
+			return
 		}
+		u.Path = cleanPath
+		u.RawQuery = r.URL.RawQuery
 
-		slog.Info("passthrough", "provider", "openai", "target", targetURL)
+		slog.Info("passthrough", "provider", "openai", "path", cleanPath)
 
-		_, err := forwardRequest(w, r, targetURL, func(req *http.Request) {
+		_, err = forwardRequest(w, r, u.String(), func(req *http.Request) {
 			req.Header.Set("Authorization", "Bearer "+cfg.OpenAIAPIKey)
 		})
 		if err != nil {
@@ -45,15 +49,16 @@ func handleGeminiPassthrough(cfg *Config) http.HandlerFunc {
 			return
 		}
 
-		// Strip /gemini prefix: /gemini/v1beta/models/... -> /v1beta/models/...
-		path := strings.TrimPrefix(r.URL.Path, "/gemini")
-		u, err := url.Parse(cfg.GeminiBaseURL + path)
+		// Strip /gemini prefix and sanitize: /gemini/v1beta/models/... -> /v1beta/models/...
+		cleanPath := path.Clean(strings.TrimPrefix(r.URL.Path, "/gemini"))
+		u, err := url.Parse(cfg.GeminiBaseURL)
 		if err != nil {
-			writeErrorJSON(w, http.StatusBadRequest, "invalid URL", "invalid_request_error")
+			writeErrorJSON(w, http.StatusInternalServerError, "invalid base URL", "server_error")
 			return
 		}
+		u.Path = cleanPath
 
-		// Append API key as query parameter
+		// Append client query params + API key
 		q := u.Query()
 		for k, vs := range r.URL.Query() {
 			for _, v := range vs {
@@ -63,7 +68,7 @@ func handleGeminiPassthrough(cfg *Config) http.HandlerFunc {
 		q.Set("key", cfg.GeminiAPIKey)
 		u.RawQuery = q.Encode()
 
-		slog.Info("passthrough", "provider", "gemini", "target", u.String())
+		slog.Info("passthrough", "provider", "gemini", "path", cleanPath)
 
 		_, err = forwardRequest(w, r, u.String(), nil)
 		if err != nil {
@@ -79,16 +84,19 @@ func handleTavilyPassthrough(cfg *Config) http.HandlerFunc {
 			return
 		}
 
-		// Strip /tavily prefix: /tavily/search -> /search
-		path := strings.TrimPrefix(r.URL.Path, "/tavily")
-		targetURL := cfg.TavilyBaseURL + path
-		if r.URL.RawQuery != "" {
-			targetURL += "?" + r.URL.RawQuery
+		// Strip /tavily prefix and sanitize: /tavily/search -> /search
+		cleanPath := path.Clean(strings.TrimPrefix(r.URL.Path, "/tavily"))
+		u, err := url.Parse(cfg.TavilyBaseURL)
+		if err != nil {
+			writeErrorJSON(w, http.StatusInternalServerError, "invalid base URL", "server_error")
+			return
 		}
+		u.Path = cleanPath
+		u.RawQuery = r.URL.RawQuery
 
-		slog.Info("passthrough", "provider", "tavily", "target", targetURL)
+		slog.Info("passthrough", "provider", "tavily", "path", cleanPath)
 
-		_, err := forwardRequest(w, r, targetURL, func(req *http.Request) {
+		_, err = forwardRequest(w, r, u.String(), func(req *http.Request) {
 			req.Header.Set("Authorization", "Bearer "+cfg.TavilyAPIKey)
 		})
 		if err != nil {

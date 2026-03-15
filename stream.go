@@ -26,6 +26,7 @@ func proxySSEStream(
 	w.Header().Set("Connection", "keep-alive")
 
 	var accumulated strings.Builder
+	const maxAccumulate = maxBodyLogSize // from log.go; stop accumulating beyond this
 	scanner := bufio.NewScanner(upstreamBody)
 	// Increase buffer size for large SSE chunks
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -53,10 +54,14 @@ func proxySSEStream(
 				// Skip malformed chunks
 				continue
 			}
-			accumulated.Write(transformed)
+			if accumulated.Len() < maxAccumulate {
+				accumulated.Write(transformed)
+			}
 			fmt.Fprintf(w, "data: %s\n\n", transformed)
 		} else {
-			accumulated.WriteString(data)
+			if accumulated.Len() < maxAccumulate {
+				accumulated.WriteString(data)
+			}
 			fmt.Fprintf(w, "data: %s\n\n", data)
 		}
 		flusher.Flush()
