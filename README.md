@@ -1,8 +1,41 @@
 # gollmproxy
 
-LiteLLM互換の軽量LLMプロキシ。Go製。
+Go製の軽量LLMプロキシ。[LiteLLM](https://github.com/BerriAI/litellm) の設定形式に互換性があり、LiteLLMからの移行やドロップイン代替として使用できる。
 
 OpenAI・Gemini・TavilyのAPIを統一的なOpenAI互換インターフェースで利用でき、各バックエンドへのパススルーも可能。プロキシがAPIキーを注入するため、クライアント側でのキー管理が不要になる。
+
+**LiteLLMの全機能を実装しているわけではありません。** APIキー管理・プロバイダルーティング・ログ記録など、プロキシとしての中核機能に特化しています。
+
+## LiteLLMとの比較
+
+| | gollmproxy | LiteLLM |
+|---|---|---|
+| 起動時間 | ~9 ms | ~31 s |
+| メモリ使用量 | ~7 MB | ~320 MB |
+| 言語 | Go (シングルバイナリ) | Python |
+| 対応プロバイダ | OpenAI, Gemini, Tavily | 100+ プロバイダ |
+| DB依存 | なし | PostgreSQL (optional) |
+| 設定形式 | LiteLLM互換YAML | YAML |
+
+### 実装済み機能
+
+- OpenAI互換エンドポイント (`/v1/chat/completions`)
+- プロバイダルーティング (`openai/`, `gemini/` プレフィックス)
+- `model_list` によるモデルエイリアス解決
+- パススルーエンドポイント (`/openai/*`, `/gemini/*`, `/tavily/*`)
+- APIキー認証 (`master_key`, カスタムヘッダ名)
+- SSEストリーミング (Gemini→OpenAI形式変換)
+- リクエストログ (JSONL, user/metadata/トークン使用量)
+- `os.environ/` 構文による環境変数参照
+
+### 未実装の主なLiteLLM機能
+
+- Anthropic, Azure, Bedrock, Vertex AI 等のプロバイダ
+- ロードバランシング・フォールバック
+- レートリミット・バジェット管理
+- キャッシング
+- Embeddings / Image Generation / Audio エンドポイント
+- Web UI (Admin Panel)
 
 ## 機能
 
