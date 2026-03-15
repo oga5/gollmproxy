@@ -233,10 +233,31 @@ tail -f gollmproxy.log | jq .
 | `completion_tokens` | 生成トークン数 |
 | `total_tokens` | 合計トークン数 |
 | `req_body` | リクエストボディ (最大10KB, 設定で無効化可) |
-| `resp_body` | レスポンスボディ (最大10KB, 設定で無効化可) |
+| `resp_body` | レスポンスボディ (最大10KB, 設定で無効化可、非ストリーミングのみ) |
 | `client_ip` | クライアントIPアドレス |
 
 トークン使用量は非ストリーミングレスポンスで記録される。
+
+### ストリーミング時のチャンクログ
+
+`log_response_body: true`（デフォルト）の場合、SSEストリーミングではレスポンスボディをメモリに蓄積せず、チャンクごとに個別のJSONLエントリとして即座に書き出す。サマリログの `resp_body` は空になる。
+
+チャンクログのフィールド:
+
+| フィールド | 説明 |
+|-----------|------|
+| `timestamp` | チャンク送信時刻 (RFC3339) |
+| `request_id` | 対応するリクエストのID |
+| `chunk_index` | チャンクの連番 (0始まり) |
+| `data` | SSEチャンクのデータ (最大10KB) |
+
+```bash
+# チャンクログのみ抽出
+jq 'select(.chunk_index != null)' gollmproxy.log
+
+# サマリログのみ抽出
+jq 'select(.chunk_index == null)' gollmproxy.log
+```
 
 ## ライセンス
 
