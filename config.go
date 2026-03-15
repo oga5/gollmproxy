@@ -28,6 +28,9 @@ type Config struct {
 	OpenAIBaseURL string
 	GeminiBaseURL string
 	TavilyBaseURL string
+
+	// ModelAliases maps model_name to litellm_params.model (e.g. "gemini-2.5-flash" -> "gemini/gemini-2.5-flash")
+	ModelAliases map[string]string
 }
 
 // LiteLLM-compatible YAML config types
@@ -211,11 +214,19 @@ func loadYAMLConfig(path string, cfg *Config) {
 		cfg.GeminiAPIKey = v
 	}
 
-	// Extract provider config from model_list
+	// Extract provider config and build model alias map from model_list
+	if cfg.ModelAliases == nil {
+		cfg.ModelAliases = make(map[string]string)
+	}
 	for _, entry := range lc.ModelList {
 		model := entry.LiteLLMParams.Model
 		apiKey := resolveEnvRef(entry.LiteLLMParams.APIKey)
 		apiBase := entry.LiteLLMParams.APIBase
+
+		// Register model_name -> litellm_params.model alias
+		if entry.ModelName != "" && model != "" {
+			cfg.ModelAliases[entry.ModelName] = model
+		}
 
 		switch {
 		case strings.HasPrefix(model, "openai/"):

@@ -44,8 +44,14 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 			return
 		}
 
+		// Resolve model alias (model_name -> litellm_params.model)
+		modelField := req.Model
+		if mapped, ok := cfg.ModelAliases[modelField]; ok {
+			modelField = mapped
+		}
+
 		// Parse provider prefix
-		provider, model := parseModelPrefix(req.Model)
+		provider, model := parseModelPrefix(modelField)
 
 		if !validModelName.MatchString(model) {
 			writeErrorJSON(w, http.StatusBadRequest, "invalid model name", "invalid_request_error")
