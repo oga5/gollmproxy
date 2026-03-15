@@ -1,0 +1,13 @@
+# gollmproxy configuration
+port: 8080
+log_file: "gollmproxy.log"
+
+# API keys (environment variables take precedence)
+# openai_api_key: "sk-..."
+# gemini_api_key: "AIza..."
+# tavily_api_key: "tvly-..."
+
+# Custom base URLs (optional)
+# openai_base_url: "https://api.openai.com"
+# gemini_base_url: "https://generativelanguage.googleapis.com"
+# tavily_base_url: "https://api.tavily.com"
