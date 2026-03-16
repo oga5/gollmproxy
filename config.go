@@ -31,6 +31,15 @@ type Config struct {
 
 	// ModelAliases maps model_name to the provider-prefixed model (e.g. "gemini-2.5-flash" -> "gemini/gemini-2.5-flash")
 	ModelAliases map[string]string
+
+	// ModelConfigs maps provider-prefixed model to per-model config overrides (api_base, api_key)
+	ModelConfigs map[string]ModelConfig
+}
+
+// ModelConfig holds per-model configuration overrides.
+type ModelConfig struct {
+	APIKey  string
+	APIBase string
 }
 
 // YAML config types
@@ -207,6 +216,9 @@ func loadYAMLConfig(path string, cfg *Config) {
 	if cfg.ModelAliases == nil {
 		cfg.ModelAliases = make(map[string]string)
 	}
+	if cfg.ModelConfigs == nil {
+		cfg.ModelConfigs = make(map[string]ModelConfig)
+	}
 	for _, entry := range lc.ModelList {
 		model := entry.Params.Model
 		apiKey := resolveEnvRef(entry.Params.APIKey)
@@ -215,6 +227,14 @@ func loadYAMLConfig(path string, cfg *Config) {
 		// Register model_name -> provider-prefixed model alias
 		if entry.ModelName != "" && model != "" {
 			cfg.ModelAliases[entry.ModelName] = model
+		}
+
+		// Store per-model config overrides
+		if model != "" && (apiKey != "" || apiBase != "") {
+			cfg.ModelConfigs[model] = ModelConfig{
+				APIKey:  apiKey,
+				APIBase: apiBase,
+			}
 		}
 
 		switch {
