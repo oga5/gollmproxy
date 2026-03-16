@@ -12,9 +12,9 @@ import (
 	"time"
 )
 
-// validModelName allows alphanumeric, dots, hyphens, underscores, and colons.
-// Slashes are NOT allowed (provider prefix is already stripped).
-var validModelName = regexp.MustCompile(`^[a-zA-Z0-9._:-]+$`)
+// validModelName allows alphanumeric, dots, hyphens, underscores, colons, and slashes.
+// Slashes are allowed for providers like OpenRouter where model names contain them (e.g. "stepfun/step-3.5-flash:free").
+var validModelName = regexp.MustCompile(`^[a-zA-Z0-9._:/-]+$`)
 
 const (
 	maxRequestSize  = 10 << 20 // 10MB
@@ -73,6 +73,8 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 			handleGeminiProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
 		case "ollama_chat":
 			handleOllamaChatProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
+		case "openrouter":
+			handleOpenRouterProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
 		default:
 			writeErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("unsupported provider: %s", provider), "invalid_request_error")
 		}
@@ -237,6 +239,76 @@ func handleOllamaChatProvider(w http.ResponseWriter, r *http.Request, cfg *Confi
 			usage = openaiResp.Usage
 		}
 		logRequest(logger, cfg, reqID, r, "ollama_chat", model, false, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, req.Metadata, usage)
+	}
+}
+
+func handleOpenRouterProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
+	apiKey := perModelCfg.APIKey
+	if apiKey == "" {
+		apiKey = cfg.OpenRouterAPIKey
+	}
+	if apiKey == "" {
+		writeErrorJSON(w, http.StatusInternalServerError, "OPENROUTER_API_KEY not configured", "server_error")
+		return
+	}
+
+	// Model name is passed as-is (e.g. "stepfun/step-3.5-flash:free")
+	modifiedBody := rewriteModelField(bodyBytes, model)
+
+	baseURL := perModelCfg.APIBase
+	if baseURL == "" {
+		baseURL = cfg.OpenRouterBaseURL
+	}
+	targetURL := baseURL + "/v1/chat/completions"
+
+	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(modifiedBody))
+	if err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
+		return
+	}
+	upstreamReq.Header.Set("Content-Type", "application/json")
+	upstreamReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := httpClient.Do(upstreamReq)
+	if err != nil {
+		slog.Error("openrouter upstream error", "request_id", reqID, "error", err)
+		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
+		return
+	}
+	defer resp.Body.Close()
+
+	if req.Stream {
+		setSSEHeaders(w)
+		var onChunk onChunkFunc
+		if cfg.LogResponseBody {
+			onChunk = func(index int, data []byte) {
+				logger.LogChunk(ChunkLogEntry{
+					RequestID:  reqID,
+					ChunkIndex: index,
+					Data:       string(data),
+				})
+			}
+		}
+		if err := proxySSEStream(w, resp.Body, nil, onChunk); err != nil {
+			slog.Error("streaming error", "error", err)
+		}
+		logRequest(logger, cfg, reqID, r, "openrouter", model, true, resp.StatusCode, start, string(bodyBytes), "", req.User, req.Metadata, nil)
+	} else {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+		for k, vs := range resp.Header {
+			for _, v := range vs {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		w.Write(respBody)
+
+		var usage *OpenAIUsage
+		var openaiResp OpenAIChatResponse
+		if json.Unmarshal(respBody, &openaiResp) == nil {
+			usage = openaiResp.Usage
+		}
+		logRequest(logger, cfg, reqID, r, "openrouter", model, false, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, req.Metadata, usage)
 	}
 }
 

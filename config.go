@@ -21,13 +21,15 @@ type Config struct {
 	KeyHeaderName      string
 	TrustedProxyHeader string
 
-	OpenAIAPIKey string
-	GeminiAPIKey string
-	TavilyAPIKey string
+	OpenAIAPIKey      string
+	GeminiAPIKey      string
+	TavilyAPIKey      string
+	OpenRouterAPIKey  string
 
-	OpenAIBaseURL string
-	GeminiBaseURL string
-	TavilyBaseURL string
+	OpenAIBaseURL      string
+	GeminiBaseURL      string
+	TavilyBaseURL      string
+	OpenRouterBaseURL  string
 
 	// ModelAliases maps model_name to the provider-prefixed model (e.g. "gemini-2.5-flash" -> "gemini/gemini-2.5-flash")
 	ModelAliases map[string]string
@@ -102,9 +104,10 @@ func LoadConfig() *Config {
 		LogFile:         "gollmproxy.log",
 		LogRequestBody:  true,
 		LogResponseBody: true,
-		OpenAIBaseURL:   "https://api.openai.com",
-		GeminiBaseURL:   "https://generativelanguage.googleapis.com",
-		TavilyBaseURL:   "https://api.tavily.com",
+		OpenAIBaseURL:      "https://api.openai.com",
+		GeminiBaseURL:      "https://generativelanguage.googleapis.com",
+		TavilyBaseURL:      "https://api.tavily.com",
+		OpenRouterBaseURL:  "https://openrouter.ai/api",
 	}
 
 	flag.StringVar(&configFile, "config", "", "config file path (YAML)")
@@ -139,6 +142,9 @@ func LoadConfig() *Config {
 	if v := os.Getenv("TAVILY_API_KEY"); v != "" {
 		cfg.TavilyAPIKey = v
 	}
+	if v := os.Getenv("OPENROUTER_API_KEY"); v != "" {
+		cfg.OpenRouterAPIKey = v
+	}
 
 	if v := os.Getenv("OPENAI_BASE_URL"); v != "" {
 		cfg.OpenAIBaseURL = v
@@ -148,6 +154,9 @@ func LoadConfig() *Config {
 	}
 	if v := os.Getenv("TAVILY_BASE_URL"); v != "" {
 		cfg.TavilyBaseURL = v
+	}
+	if v := os.Getenv("OPENROUTER_BASE_URL"); v != "" {
+		cfg.OpenRouterBaseURL = v
 	}
 
 	return cfg
@@ -251,6 +260,13 @@ func loadYAMLConfig(path string, cfg *Config) {
 			}
 			if apiBase != "" {
 				cfg.GeminiBaseURL = apiBase
+			}
+		case strings.HasPrefix(model, "openrouter/"):
+			if cfg.OpenRouterAPIKey == "" && apiKey != "" {
+				cfg.OpenRouterAPIKey = apiKey
+			}
+			if apiBase != "" {
+				cfg.OpenRouterBaseURL = apiBase
 			}
 		}
 	}

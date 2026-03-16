@@ -12,6 +12,7 @@ func registerPassthroughRoutes(mux *http.ServeMux, cfg *Config) {
 	mux.HandleFunc("/openai/", handleOpenAIPassthrough(cfg))
 	mux.HandleFunc("/gemini/", handleGeminiPassthrough(cfg))
 	mux.HandleFunc("/tavily/", handleTavilyPassthrough(cfg))
+	mux.HandleFunc("/openrouter/", handleOpenRouterPassthrough(cfg))
 }
 
 func handleOpenAIPassthrough(cfg *Config) http.HandlerFunc {
@@ -73,6 +74,34 @@ func handleGeminiPassthrough(cfg *Config) http.HandlerFunc {
 		_, err = forwardRequest(w, r, u.String(), nil)
 		if err != nil {
 			slog.Error("passthrough error", "provider", "gemini", "error", err)
+		}
+	}
+}
+
+func handleOpenRouterPassthrough(cfg *Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if cfg.OpenRouterAPIKey == "" {
+			writeErrorJSON(w, http.StatusInternalServerError, "OPENROUTER_API_KEY not configured", "server_error")
+			return
+		}
+
+		// Strip /openrouter prefix and sanitize: /openrouter/v1/models -> /v1/models
+		cleanPath := path.Clean(strings.TrimPrefix(r.URL.Path, "/openrouter"))
+		u, err := url.Parse(cfg.OpenRouterBaseURL)
+		if err != nil {
+			writeErrorJSON(w, http.StatusInternalServerError, "invalid base URL", "server_error")
+			return
+		}
+		u.Path = cleanPath
+		u.RawQuery = r.URL.RawQuery
+
+		slog.Info("passthrough", "provider", "openrouter", "path", cleanPath)
+
+		_, err = forwardRequest(w, r, u.String(), func(req *http.Request) {
+			req.Header.Set("Authorization", "Bearer "+cfg.OpenRouterAPIKey)
+		})
+		if err != nil {
+			slog.Error("passthrough error", "provider", "openrouter", "error", err)
 		}
 	}
 }
