@@ -53,6 +53,12 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 		// Parse provider prefix
 		provider, model := parseModelPrefix(modelField)
 
+		// Look up per-model config overrides
+		var perModelCfg ModelConfig
+		if mc, ok := cfg.ModelConfigs[modelField]; ok {
+			perModelCfg = mc
+		}
+
 		if !validModelName.MatchString(model) {
 			writeErrorJSON(w, http.StatusBadRequest, "invalid model name", "invalid_request_error")
 			return
@@ -62,9 +68,11 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 
 		switch provider {
 		case "openai":
-			handleOpenAIProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start)
+			handleOpenAIProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
 		case "gemini":
-			handleGeminiProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start)
+			handleGeminiProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
+		case "ollama_chat":
+			handleOllamaChatProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
 		default:
 			writeErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("unsupported provider: %s", provider), "invalid_request_error")
 		}
@@ -81,8 +89,12 @@ func parseModelPrefix(model string) (provider, modelName string) {
 	return "openai", model
 }
 
-func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time) {
-	if cfg.OpenAIAPIKey == "" {
+func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
+	apiKey := perModelCfg.APIKey
+	if apiKey == "" {
+		apiKey = cfg.OpenAIAPIKey
+	}
+	if apiKey == "" {
 		writeErrorJSON(w, http.StatusInternalServerError, "OPENAI_API_KEY not configured", "server_error")
 		return
 	}
@@ -90,7 +102,11 @@ func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 	// Rewrite model field (strip provider prefix)
 	modifiedBody := rewriteModelField(bodyBytes, model)
 
-	targetURL := cfg.OpenAIBaseURL + "/v1/chat/completions"
+	baseURL := perModelCfg.APIBase
+	if baseURL == "" {
+		baseURL = cfg.OpenAIBaseURL
+	}
+	targetURL := baseURL + "/v1/chat/completions"
 
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(modifiedBody))
 	if err != nil {
@@ -98,7 +114,7 @@ func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 		return
 	}
 	upstreamReq.Header.Set("Content-Type", "application/json")
-	upstreamReq.Header.Set("Authorization", "Bearer "+cfg.OpenAIAPIKey)
+	upstreamReq.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := httpClient.Do(upstreamReq)
 	if err != nil {
@@ -161,8 +177,75 @@ func rewriteModelField(body []byte, newModel string) []byte {
 	return result
 }
 
-func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time) {
-	if cfg.GeminiAPIKey == "" {
+func handleOllamaChatProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
+	// Rewrite model field (strip provider prefix)
+	modifiedBody := rewriteModelField(bodyBytes, model)
+
+	baseURL := perModelCfg.APIBase
+	if baseURL == "" {
+		baseURL = "http://localhost:11434"
+	}
+	targetURL := baseURL + "/v1/chat/completions"
+
+	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(modifiedBody))
+	if err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
+		return
+	}
+	upstreamReq.Header.Set("Content-Type", "application/json")
+	if apiKey := perModelCfg.APIKey; apiKey != "" {
+		upstreamReq.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	resp, err := httpClient.Do(upstreamReq)
+	if err != nil {
+		slog.Error("ollama upstream error", "request_id", reqID, "error", err)
+		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
+		return
+	}
+	defer resp.Body.Close()
+
+	if req.Stream {
+		setSSEHeaders(w)
+		var onChunk onChunkFunc
+		if cfg.LogResponseBody {
+			onChunk = func(index int, data []byte) {
+				logger.LogChunk(ChunkLogEntry{
+					RequestID:  reqID,
+					ChunkIndex: index,
+					Data:       string(data),
+				})
+			}
+		}
+		if err := proxySSEStream(w, resp.Body, nil, onChunk); err != nil {
+			slog.Error("streaming error", "error", err)
+		}
+		logRequest(logger, cfg, reqID, r, "ollama_chat", model, true, resp.StatusCode, start, string(bodyBytes), "", req.User, req.Metadata, nil)
+	} else {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+		for k, vs := range resp.Header {
+			for _, v := range vs {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		w.Write(respBody)
+
+		var usage *OpenAIUsage
+		var openaiResp OpenAIChatResponse
+		if json.Unmarshal(respBody, &openaiResp) == nil {
+			usage = openaiResp.Usage
+		}
+		logRequest(logger, cfg, reqID, r, "ollama_chat", model, false, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, req.Metadata, usage)
+	}
+}
+
+func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
+	apiKey := perModelCfg.APIKey
+	if apiKey == "" {
+		apiKey = cfg.GeminiAPIKey
+	}
+	if apiKey == "" {
 		writeErrorJSON(w, http.StatusInternalServerError, "GEMINI_API_KEY not configured", "server_error")
 		return
 	}
@@ -176,13 +259,17 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 	}
 
 	// Build Gemini URL
+	baseURL := perModelCfg.APIBase
+	if baseURL == "" {
+		baseURL = cfg.GeminiBaseURL
+	}
 	var targetURL string
 	if req.Stream {
 		targetURL = fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s",
-			cfg.GeminiBaseURL, model, cfg.GeminiAPIKey)
+			baseURL, model, apiKey)
 	} else {
 		targetURL = fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s",
-			cfg.GeminiBaseURL, model, cfg.GeminiAPIKey)
+			baseURL, model, apiKey)
 	}
 
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(geminiBody))
