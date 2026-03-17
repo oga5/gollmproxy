@@ -36,12 +36,23 @@ type Config struct {
 
 	// ModelConfigs maps provider-prefixed model to per-model config overrides (api_base, api_key)
 	ModelConfigs map[string]ModelConfig
+
+	// PassThroughEndpoints holds custom pass-through proxy endpoints from config.
+	PassThroughEndpoints []PassThroughEndpoint
 }
 
 // ModelConfig holds per-model configuration overrides.
 type ModelConfig struct {
 	APIKey  string
 	APIBase string
+}
+
+// PassThroughEndpoint defines a custom pass-through proxy endpoint.
+type PassThroughEndpoint struct {
+	Path           string            // local route path prefix (e.g. "/myapi")
+	Target         string            // upstream base URL (e.g. "https://api.example.com")
+	Headers        map[string]string // static headers to inject into upstream requests
+	ForwardHeaders bool              // if true, forward all incoming request headers to upstream
 }
 
 // YAML config types
@@ -65,13 +76,21 @@ type modelParams struct {
 }
 
 type generalSettings struct {
-	Port               int    `yaml:"port"`
-	LogFile            string `yaml:"log_file"`
-	LogRequestBody     *bool  `yaml:"log_request_body"`
-	LogResponseBody    *bool  `yaml:"log_response_body"`
-	MasterKey          string `yaml:"master_key"`
-	KeyHeaderName      string `yaml:"litellm_key_header_name"`
-	TrustedProxyHeader string `yaml:"trusted_proxy_header"`
+	Port                 int                        `yaml:"port"`
+	LogFile              string                     `yaml:"log_file"`
+	LogRequestBody       *bool                      `yaml:"log_request_body"`
+	LogResponseBody      *bool                      `yaml:"log_response_body"`
+	MasterKey            string                     `yaml:"master_key"`
+	KeyHeaderName        string                     `yaml:"litellm_key_header_name"`
+	TrustedProxyHeader   string                     `yaml:"trusted_proxy_header"`
+	PassThroughEndpoints []yamlPassThroughEndpoint  `yaml:"pass_through_endpoints"`
+}
+
+type yamlPassThroughEndpoint struct {
+	Path           string            `yaml:"path"`
+	Target         string            `yaml:"target"`
+	Headers        map[string]string `yaml:"headers"`
+	ForwardHeaders bool              `yaml:"forward_headers"`
 }
 
 type searchToolEntry struct {
@@ -203,6 +222,25 @@ func loadYAMLConfig(path string, cfg *Config) {
 	}
 	if lc.GeneralSettings.LogResponseBody != nil {
 		cfg.LogResponseBody = *lc.GeneralSettings.LogResponseBody
+	}
+
+	// Load pass-through endpoints
+	for _, ep := range lc.GeneralSettings.PassThroughEndpoints {
+		if ep.Path == "" || ep.Target == "" {
+			slog.Warn("skipping pass_through_endpoint with empty path or target")
+			continue
+		}
+		headers := make(map[string]string, len(ep.Headers))
+		for k, v := range ep.Headers {
+			headers[k] = resolveEnvRef(v)
+		}
+		cfg.PassThroughEndpoints = append(cfg.PassThroughEndpoints, PassThroughEndpoint{
+			Path:           ep.Path,
+			Target:         ep.Target,
+			Headers:        headers,
+			ForwardHeaders: ep.ForwardHeaders,
+		})
+		slog.Info("loaded pass_through_endpoint", "path", ep.Path, "target", ep.Target, "forward_headers", ep.ForwardHeaders)
 	}
 
 	// Extract search tool config (e.g., Tavily)

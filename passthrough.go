@@ -13,6 +13,16 @@ func registerPassthroughRoutes(mux *http.ServeMux, cfg *Config) {
 	mux.HandleFunc("/gemini/", handleGeminiPassthrough(cfg))
 	mux.HandleFunc("/tavily/", handleTavilyPassthrough(cfg))
 	mux.HandleFunc("/openrouter/", handleOpenRouterPassthrough(cfg))
+
+	// Register custom pass-through endpoints from config
+	for _, ep := range cfg.PassThroughEndpoints {
+		routePath := ep.Path
+		if !strings.HasSuffix(routePath, "/") {
+			routePath += "/"
+		}
+		mux.HandleFunc(routePath, handleConfiguredPassthrough(ep))
+		slog.Info("registered pass-through endpoint", "path", routePath, "target", ep.Target)
+	}
 }
 
 func handleOpenAIPassthrough(cfg *Config) http.HandlerFunc {
@@ -130,6 +140,45 @@ func handleTavilyPassthrough(cfg *Config) http.HandlerFunc {
 		})
 		if err != nil {
 			slog.Error("passthrough error", "provider", "tavily", "error", err)
+		}
+	}
+}
+
+func handleConfiguredPassthrough(ep PassThroughEndpoint) http.HandlerFunc {
+	prefix := ep.Path
+	if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Strip prefix and sanitize path
+		cleanPath := path.Clean(strings.TrimPrefix(r.URL.Path, strings.TrimSuffix(prefix, "/")))
+		u, err := url.Parse(ep.Target)
+		if err != nil {
+			writeErrorJSON(w, http.StatusInternalServerError, "invalid target URL", "server_error")
+			return
+		}
+		u.Path = path.Join(u.Path, cleanPath)
+		u.RawQuery = r.URL.RawQuery
+
+		slog.Info("passthrough", "endpoint", ep.Path, "path", cleanPath)
+
+		_, err = forwardRequest(w, r, u.String(), func(req *http.Request) {
+			// Forward all incoming headers if enabled
+			if ep.ForwardHeaders {
+				for k, vs := range r.Header {
+					for _, v := range vs {
+						req.Header.Add(k, v)
+					}
+				}
+			}
+			// Set static headers from config (overrides forwarded headers)
+			for k, v := range ep.Headers {
+				req.Header.Set(k, v)
+			}
+		})
+		if err != nil {
+			slog.Error("passthrough error", "endpoint", ep.Path, "error", err)
 		}
 	}
 }

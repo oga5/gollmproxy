@@ -25,3 +25,10 @@ general_settings:
   log_file: "gollmproxy.log"
   log_request_body: true
   log_response_body: true
+  # pass_through_endpoints:
+  #   - path: /custom-api
+  #     target: https://api.example.com
+  #     headers:
+  #       Authorization: "Bearer os.environ/CUSTOM_API_KEY"
+  #       X-Custom-Header: "some-value"
+  #     forward_headers: true
