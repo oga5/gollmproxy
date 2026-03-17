@@ -65,6 +65,35 @@ type OpenAIDelta struct {
 	Content string `json:"content,omitempty"`
 }
 
+// --- Embeddings Request ---
+
+type OpenAIEmbeddingRequest struct {
+	Input          any    `json:"input"` // string or []string
+	Model          string `json:"model"`
+	EncodingFormat string `json:"encoding_format,omitempty"` // "float" or "base64"
+	User           string `json:"user,omitempty"`
+}
+
+// --- Embeddings Response ---
+
+type OpenAIEmbeddingResponse struct {
+	Object string              `json:"object"` // "list"
+	Data   []OpenAIEmbedding   `json:"data"`
+	Model  string              `json:"model"`
+	Usage  OpenAIEmbeddingUsage `json:"usage"`
+}
+
+type OpenAIEmbedding struct {
+	Object    string    `json:"object"` // "embedding"
+	Embedding []float64 `json:"embedding"`
+	Index     int       `json:"index"`
+}
+
+type OpenAIEmbeddingUsage struct {
+	PromptTokens int `json:"prompt_tokens"`
+	TotalTokens  int `json:"total_tokens"`
+}
+
 // --- Error ---
 
 type OpenAIErrorResponse struct {

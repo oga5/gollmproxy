@@ -31,6 +31,9 @@ func NewServer(cfg *Config, logger *RequestLogger) http.Handler {
 	// OpenAI-compatible unified endpoint
 	registerOpenAICompatRoutes(mux, cfg, logger)
 
+	// Embeddings endpoint
+	registerEmbeddingsRoute(mux, cfg, logger)
+
 	// Pass-through routes
 	registerPassthroughRoutes(mux, cfg)
 

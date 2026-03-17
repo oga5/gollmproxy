@@ -14,6 +14,18 @@ model_list:
     litellm_params:
       model: ollama_chat/gpt-oss:20b
       api_base: http://localhost:11434
+  - model_name: text-embedding-3-small
+    litellm_params:
+      model: openai/text-embedding-3-small
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      mode: embedding
+  - model_name: gemini-embedding
+    litellm_params:
+      model: gemini/text-embedding-004
+      api_key: os.environ/GEMINI_API_KEY
+    model_info:
+      mode: embedding
 
 environment_variables:
   # OPENAI_API_KEY: "sk-..."
