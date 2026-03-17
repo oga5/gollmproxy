@@ -37,6 +37,9 @@ type Config struct {
 	// ModelConfigs maps provider-prefixed model to per-model config overrides (api_base, api_key)
 	ModelConfigs map[string]ModelConfig
 
+	// EmbeddingModels is the set of provider-prefixed models that have mode: embedding in model_info.
+	EmbeddingModels map[string]bool
+
 	// PassThroughEndpoints holds custom pass-through proxy endpoints from config.
 	PassThroughEndpoints []PassThroughEndpoint
 }
@@ -65,8 +68,13 @@ type yamlConfig struct {
 }
 
 type modelListEntry struct {
-	ModelName     string        `yaml:"model_name"`
-	Params modelParams `yaml:"litellm_params"`
+	ModelName string      `yaml:"model_name"`
+	Params    modelParams `yaml:"litellm_params"`
+	ModelInfo modelInfo   `yaml:"model_info"`
+}
+
+type modelInfo struct {
+	Mode string `yaml:"mode"`
 }
 
 type modelParams struct {
@@ -266,6 +274,9 @@ func loadYAMLConfig(path string, cfg *Config) {
 	if cfg.ModelConfigs == nil {
 		cfg.ModelConfigs = make(map[string]ModelConfig)
 	}
+	if cfg.EmbeddingModels == nil {
+		cfg.EmbeddingModels = make(map[string]bool)
+	}
 	for _, entry := range lc.ModelList {
 		model := entry.Params.Model
 		apiKey := resolveEnvRef(entry.Params.APIKey)
@@ -274,6 +285,14 @@ func loadYAMLConfig(path string, cfg *Config) {
 		// Register model_name -> provider-prefixed model alias
 		if entry.ModelName != "" && model != "" {
 			cfg.ModelAliases[entry.ModelName] = model
+		}
+
+		// Track embedding models
+		if entry.ModelInfo.Mode == "embedding" && model != "" {
+			cfg.EmbeddingModels[model] = true
+			if entry.ModelName != "" {
+				cfg.EmbeddingModels[entry.ModelName] = true
+			}
 		}
 
 		// Store per-model config overrides

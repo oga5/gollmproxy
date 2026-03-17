@@ -26,6 +26,31 @@ type GeminiGenerationConfig struct {
 	CandidateCount  *int     `json:"candidateCount,omitempty"`
 }
 
+// --- Embedding Request ---
+
+type GeminiEmbedContentRequest struct {
+	Model   string       `json:"model,omitempty"`
+	Content GeminiContent `json:"content"`
+}
+
+type GeminiBatchEmbedContentsRequest struct {
+	Requests []GeminiEmbedContentRequest `json:"requests"`
+}
+
+// --- Embedding Response ---
+
+type GeminiEmbedContentResponse struct {
+	Embedding *GeminiContentEmbedding `json:"embedding,omitempty"`
+}
+
+type GeminiBatchEmbedContentsResponse struct {
+	Embeddings []GeminiContentEmbedding `json:"embeddings"`
+}
+
+type GeminiContentEmbedding struct {
+	Values []float64 `json:"values"`
+}
+
 // --- Response ---
 
 type GeminiGenerateResponse struct {
