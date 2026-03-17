@@ -52,7 +52,7 @@ type PassThroughEndpoint struct {
 	Path           string            // local route path prefix (e.g. "/myapi")
 	Target         string            // upstream base URL (e.g. "https://api.example.com")
 	Headers        map[string]string // static headers to inject into upstream requests
-	ForwardHeaders []string          // client request headers to forward to upstream
+	ForwardHeaders bool              // if true, forward all incoming request headers to upstream
 }
 
 // YAML config types
@@ -90,7 +90,7 @@ type yamlPassThroughEndpoint struct {
 	Path           string            `yaml:"path"`
 	Target         string            `yaml:"target"`
 	Headers        map[string]string `yaml:"headers"`
-	ForwardHeaders []string          `yaml:"forward_headers"`
+	ForwardHeaders bool              `yaml:"forward_headers"`
 }
 
 type searchToolEntry struct {
@@ -240,6 +240,7 @@ func loadYAMLConfig(path string, cfg *Config) {
 			Headers:        headers,
 			ForwardHeaders: ep.ForwardHeaders,
 		})
+		slog.Info("loaded pass_through_endpoint", "path", ep.Path, "target", ep.Target, "forward_headers", ep.ForwardHeaders)
 	}
 
 	// Extract search tool config (e.g., Tavily)

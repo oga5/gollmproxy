@@ -164,15 +164,17 @@ func handleConfiguredPassthrough(ep PassThroughEndpoint) http.HandlerFunc {
 		slog.Info("passthrough", "endpoint", ep.Path, "path", cleanPath)
 
 		_, err = forwardRequest(w, r, u.String(), func(req *http.Request) {
-			// Set static headers from config
+			// Forward all incoming headers if enabled
+			if ep.ForwardHeaders {
+				for k, vs := range r.Header {
+					for _, v := range vs {
+						req.Header.Add(k, v)
+					}
+				}
+			}
+			// Set static headers from config (overrides forwarded headers)
 			for k, v := range ep.Headers {
 				req.Header.Set(k, v)
-			}
-			// Forward specified headers from client request
-			for _, h := range ep.ForwardHeaders {
-				if v := r.Header.Get(h); v != "" {
-					req.Header.Set(h, v)
-				}
 			}
 		})
 		if err != nil {

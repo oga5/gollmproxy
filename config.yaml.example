@@ -31,5 +31,4 @@ general_settings:
   #     headers:
   #       Authorization: "Bearer os.environ/CUSTOM_API_KEY"
   #       X-Custom-Header: "some-value"
-  #     forward_headers:
-  #       - X-Request-Trace
+  #     forward_headers: true
