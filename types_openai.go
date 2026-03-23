@@ -72,6 +72,24 @@ type OpenAIEmbeddingRequest struct {
 	Model          string `json:"model"`
 	EncodingFormat string `json:"encoding_format,omitempty"` // "float" or "base64"
 	User           string `json:"user,omitempty"`
+	// Pooling specifies how to aggregate T×K SAE activations across the token (T) dimension.
+	// Supported values: "sum", "mean", "max", "logsumexp" (default: "logsumexp" when upstream returns 2D).
+	Pooling string `json:"pooling,omitempty"`
+}
+
+// upstreamEmbeddingResponse is used to parse upstream responses that may contain
+// 2D embeddings (T×K token-level SAE activations) before applying pooling.
+type upstreamEmbeddingResponse struct {
+	Object string                  `json:"object"`
+	Data   []upstreamEmbeddingItem `json:"data"`
+	Model  string                  `json:"model"`
+	Usage  OpenAIEmbeddingUsage    `json:"usage"`
+}
+
+type upstreamEmbeddingItem struct {
+	Object    string `json:"object"`
+	Embedding any    `json:"embedding"` // []float64 (1D) or [][]float64 (T×K SAE activations)
+	Index     int    `json:"index"`
 }
 
 // --- Embeddings Response ---

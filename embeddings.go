@@ -109,6 +109,13 @@ func handleOpenAIEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+
+	if resp.StatusCode == http.StatusOK {
+		if pooled, err := applyPoolingIfNeeded(respBody, req.Pooling); err == nil {
+			respBody = pooled
+		}
+	}
+
 	for k, vs := range resp.Header {
 		for _, v := range vs {
 			w.Header().Add(k, v)
@@ -277,6 +284,13 @@ func handleOllamaEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+
+	if resp.StatusCode == http.StatusOK {
+		if pooled, err := applyPoolingIfNeeded(respBody, req.Pooling); err == nil {
+			respBody = pooled
+		}
+	}
+
 	for k, vs := range resp.Header {
 		for _, v := range vs {
 			w.Header().Add(k, v)
@@ -324,6 +338,13 @@ func handleOpenRouterEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Con
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+
+	if resp.StatusCode == http.StatusOK {
+		if pooled, err := applyPoolingIfNeeded(respBody, req.Pooling); err == nil {
+			respBody = pooled
+		}
+	}
+
 	for k, vs := range resp.Header {
 		for _, v := range vs {
 			w.Header().Add(k, v)
