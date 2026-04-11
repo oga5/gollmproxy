@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,23 @@ import (
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	"github.com/aws/smithy-go"
 )
+
+// bedrockClient is the subset of bedrockruntime.Client methods used by the proxy.
+// It exists so tests can inject a fake client without contacting AWS.
+type bedrockClient interface {
+	InvokeModel(ctx context.Context, params *bedrockruntime.InvokeModelInput, optFns ...func(*bedrockruntime.Options)) (*bedrockruntime.InvokeModelOutput, error)
+	InvokeModelWithResponseStream(ctx context.Context, params *bedrockruntime.InvokeModelWithResponseStreamInput, optFns ...func(*bedrockruntime.Options)) (*bedrockruntime.InvokeModelWithResponseStreamOutput, error)
+}
+
+// newBedrockClient constructs a Bedrock client for the given region.
+// Tests override this variable to return a fake client.
+var newBedrockClient = func(ctx context.Context, region string) (bedrockClient, error) {
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+	if err != nil {
+		return nil, err
+	}
+	return bedrockruntime.NewFromConfig(awsCfg), nil
+}
 
 func handleBedrockProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
 	modifiedBody := rewriteModelField(bodyBytes, model)
@@ -28,14 +46,13 @@ func handleBedrockProvider(w http.ResponseWriter, r *http.Request, cfg *Config, 
 		return
 	}
 
-	awsCfg, err := awsconfig.LoadDefaultConfig(upstreamCtx, awsconfig.WithRegion(region))
+	client, err := newBedrockClient(upstreamCtx, region)
 	if err != nil {
 		slog.Error("failed to load AWS config", "request_id", reqID, "region", region, "error", err)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to load AWS configuration", "server_error")
 		return
 	}
 
-	client := bedrockruntime.NewFromConfig(awsCfg)
 	if req.Stream {
 		handleBedrockStream(w, r, cfg, logger, req, model, modifiedBody, reqID, start, client, region)
 		return
@@ -85,7 +102,7 @@ func handleBedrockProvider(w http.ResponseWriter, r *http.Request, cfg *Config, 
 	logRequest(logger, cfg, reqID, r, "bedrock", model, false, http.StatusOK, start, string(modifiedBody), string(respBody), req.User, req.Metadata, usage)
 }
 
-func handleBedrockStream(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, modifiedBody []byte, reqID string, start time.Time, client *bedrockruntime.Client, region string) {
+func handleBedrockStream(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, modifiedBody []byte, reqID string, start time.Time, client bedrockClient, region string) {
 	resp, err := client.InvokeModelWithResponseStream(r.Context(), &bedrockruntime.InvokeModelWithResponseStreamInput{
 		ModelId:     &model,
 		Body:        modifiedBody,
