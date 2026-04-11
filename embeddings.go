@@ -175,7 +175,7 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 		}
 		geminiBody, _ := json.Marshal(geminiReq)
 
-		targetURL, err := buildGeminiAPIURL(baseURL, model, "embedContent", apiKey, nil)
+		targetURL, err := buildGeminiAPIURL(baseURL, model, "embedContent", nil)
 		if err != nil {
 			writeErrorJSON(w, http.StatusInternalServerError, "failed to build gemini URL", "server_error")
 			return
@@ -190,6 +190,7 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 			return
 		}
 		upstreamReq.Header.Set("Content-Type", "application/json")
+		upstreamReq.Header.Set("x-goog-api-key", apiKey)
 
 		resp, err := httpClient.Do(upstreamReq)
 		if err != nil {
@@ -242,7 +243,7 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 		geminiReq := GeminiBatchEmbedContentsRequest{Requests: requests}
 		geminiBody, _ := json.Marshal(geminiReq)
 
-		targetURL, err := buildGeminiAPIURL(baseURL, model, "batchEmbedContents", apiKey, nil)
+		targetURL, err := buildGeminiAPIURL(baseURL, model, "batchEmbedContents", nil)
 		if err != nil {
 			writeErrorJSON(w, http.StatusInternalServerError, "failed to build gemini URL", "server_error")
 			return
@@ -257,6 +258,7 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 			return
 		}
 		upstreamReq.Header.Set("Content-Type", "application/json")
+		upstreamReq.Header.Set("x-goog-api-key", apiKey)
 
 		resp, err := httpClient.Do(upstreamReq)
 		if err != nil {

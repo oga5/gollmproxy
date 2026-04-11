@@ -150,7 +150,7 @@ func isSSE(resp *http.Response) bool {
 	return strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
 }
 
-func buildGeminiAPIURL(baseURL, model, action, apiKey string, extraQuery map[string]string) (string, error) {
+func buildGeminiAPIURL(baseURL, model, action string, extraQuery map[string]string) (string, error) {
 	base, err := url.Parse(baseURL)
 	if err != nil {
 		return "", err
@@ -158,7 +158,6 @@ func buildGeminiAPIURL(baseURL, model, action, apiKey string, extraQuery map[str
 
 	base.Path = strings.TrimRight(base.Path, "/") + fmt.Sprintf("/v1beta/models/%s:%s", model, action)
 	query := base.Query()
-	query.Set("key", apiKey)
 	for k, v := range extraQuery {
 		query.Set(k, v)
 	}

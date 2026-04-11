@@ -268,7 +268,7 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 	if req.Stream {
 		action = "streamGenerateContent"
 	}
-	targetURL, err := buildGeminiAPIURL(baseURL, model, action, apiKey, extraQuery)
+	targetURL, err := buildGeminiAPIURL(baseURL, model, action, extraQuery)
 	if err != nil {
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to build gemini URL", "server_error")
 		return
@@ -283,6 +283,7 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 		return
 	}
 	upstreamReq.Header.Set("Content-Type", "application/json")
+	upstreamReq.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := httpClient.Do(upstreamReq)
 	if err != nil {

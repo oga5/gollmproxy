@@ -69,19 +69,20 @@ func handleGeminiPassthrough(cfg *Config) http.HandlerFunc {
 		}
 		u.Path = cleanPath
 
-		// Append client query params + API key
+		// Append client query params and pass Gemini auth via header.
 		q := u.Query()
 		for k, vs := range r.URL.Query() {
 			for _, v := range vs {
 				q.Add(k, v)
 			}
 		}
-		q.Set("key", cfg.GeminiAPIKey)
 		u.RawQuery = q.Encode()
 
 		slog.Info("passthrough", "provider", "gemini", "path", cleanPath)
 
-		_, err = forwardRequest(w, r, u.String(), nil)
+		_, err = forwardRequest(w, r, u.String(), func(req *http.Request) {
+			req.Header.Set("x-goog-api-key", cfg.GeminiAPIKey)
+		})
 		if err != nil {
 			slog.Error("passthrough error", "provider", "gemini", "error", sanitizeUpstreamError(err))
 		}

@@ -99,7 +99,7 @@ func TestRedactSensitiveURLRedactsKnownKeys(t *testing.T) {
 }
 
 func TestBuildGeminiAPIURLSetsPathAndQuery(t *testing.T) {
-	got, err := buildGeminiAPIURL("https://generativelanguage.googleapis.com/base?existing=1", "gemini-2.5-flash", "streamGenerateContent", "secret", map[string]string{"alt": "sse"})
+	got, err := buildGeminiAPIURL("https://generativelanguage.googleapis.com/base?existing=1", "gemini-2.5-flash", "streamGenerateContent", map[string]string{"alt": "sse"})
 	if err != nil {
 		t.Fatalf("buildGeminiAPIURL returned error: %v", err)
 	}
@@ -118,8 +118,8 @@ func TestBuildGeminiAPIURLSetsPathAndQuery(t *testing.T) {
 	if parsed.Query().Get("alt") != "sse" {
 		t.Fatalf("expected alt=sse: %q", got)
 	}
-	if parsed.Query().Get("key") != "secret" {
-		t.Fatalf("expected key query param to be set: %q", got)
+	if parsed.Query().Get("key") != "" {
+		t.Fatalf("gemini URL should not include key query param: %q", got)
 	}
 }
 
