@@ -27,7 +27,7 @@ func main() {
 		Addr:         addr,
 		Handler:      handler,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 10 * time.Minute, // long for streaming responses
+		WriteTimeout: 0, // streaming responses may legitimately stay open longer than any fixed write deadline
 		IdleTimeout:  2 * time.Minute,
 	}
 	if err := srv.ListenAndServe(); err != nil {

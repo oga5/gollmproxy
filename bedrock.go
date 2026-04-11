@@ -16,6 +16,8 @@ import (
 
 func handleBedrockProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
 	modifiedBody := rewriteModelField(bodyBytes, model)
+	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream)
+	defer cancel()
 
 	region := perModelCfg.Region
 	if region == "" {
@@ -26,7 +28,7 @@ func handleBedrockProvider(w http.ResponseWriter, r *http.Request, cfg *Config, 
 		return
 	}
 
-	awsCfg, err := awsconfig.LoadDefaultConfig(r.Context(), awsconfig.WithRegion(region))
+	awsCfg, err := awsconfig.LoadDefaultConfig(upstreamCtx, awsconfig.WithRegion(region))
 	if err != nil {
 		slog.Error("failed to load AWS config", "request_id", reqID, "region", region, "error", err)
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to load AWS configuration", "server_error")
@@ -39,7 +41,7 @@ func handleBedrockProvider(w http.ResponseWriter, r *http.Request, cfg *Config, 
 		return
 	}
 
-	resp, err := client.InvokeModel(r.Context(), &bedrockruntime.InvokeModelInput{
+	resp, err := client.InvokeModel(upstreamCtx, &bedrockruntime.InvokeModelInput{
 		ModelId:     &model,
 		Body:        modifiedBody,
 		ContentType: stringPtr("application/json"),

@@ -48,7 +48,7 @@ func handleOpenAIPassthrough(cfg *Config) http.HandlerFunc {
 			req.Header.Set("Authorization", "Bearer "+cfg.OpenAIAPIKey)
 		})
 		if err != nil {
-			slog.Error("passthrough error", "provider", "openai", "error", err)
+			slog.Error("passthrough error", "provider", "openai", "error", sanitizeUpstreamError(err))
 		}
 	}
 }
@@ -83,7 +83,7 @@ func handleGeminiPassthrough(cfg *Config) http.HandlerFunc {
 
 		_, err = forwardRequest(w, r, u.String(), nil)
 		if err != nil {
-			slog.Error("passthrough error", "provider", "gemini", "error", err)
+			slog.Error("passthrough error", "provider", "gemini", "error", sanitizeUpstreamError(err))
 		}
 	}
 }
@@ -111,7 +111,7 @@ func handleOpenRouterPassthrough(cfg *Config) http.HandlerFunc {
 			req.Header.Set("Authorization", "Bearer "+cfg.OpenRouterAPIKey)
 		})
 		if err != nil {
-			slog.Error("passthrough error", "provider", "openrouter", "error", err)
+			slog.Error("passthrough error", "provider", "openrouter", "error", sanitizeUpstreamError(err))
 		}
 	}
 }
@@ -139,7 +139,7 @@ func handleTavilyPassthrough(cfg *Config) http.HandlerFunc {
 			req.Header.Set("Authorization", "Bearer "+cfg.TavilyAPIKey)
 		})
 		if err != nil {
-			slog.Error("passthrough error", "provider", "tavily", "error", err)
+			slog.Error("passthrough error", "provider", "tavily", "error", sanitizeUpstreamError(err))
 		}
 	}
 }
@@ -178,7 +178,7 @@ func handleConfiguredPassthrough(ep PassThroughEndpoint) http.HandlerFunc {
 			}
 		})
 		if err != nil {
-			slog.Error("passthrough error", "endpoint", ep.Path, "error", err)
+			slog.Error("passthrough error", "endpoint", ep.Path, "error", sanitizeUpstreamError(err))
 		}
 	}
 }

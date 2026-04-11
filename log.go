@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -43,7 +44,7 @@ type RequestLogger struct {
 }
 
 func NewRequestLogger(path string) (*RequestLogger, error) {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -59,13 +60,16 @@ func (l *RequestLogger) Log(entry LogEntry) {
 
 	data, err := json.Marshal(entry)
 	if err != nil {
+		slog.Warn("failed to marshal request log entry", "error", err)
 		return
 	}
 	data = append(data, '\n')
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.file.Write(data)
+	if _, err := l.file.Write(data); err != nil {
+		slog.Warn("failed to write request log entry", "error", err)
+	}
 }
 
 func (l *RequestLogger) LogChunk(entry ChunkLogEntry) {
@@ -76,13 +80,16 @@ func (l *RequestLogger) LogChunk(entry ChunkLogEntry) {
 
 	data, err := json.Marshal(entry)
 	if err != nil {
+		slog.Warn("failed to marshal chunk log entry", "error", err)
 		return
 	}
 	data = append(data, '\n')
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.file.Write(data)
+	if _, err := l.file.Write(data); err != nil {
+		slog.Warn("failed to write chunk log entry", "error", err)
+	}
 }
 
 func (l *RequestLogger) Close() error {

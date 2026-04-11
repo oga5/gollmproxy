@@ -96,6 +96,72 @@ func parseModelPrefix(model string) (provider, modelName string) {
 	return "openai", model
 }
 
+func forwardOpenAICompatChat(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, provider, providerLabel, model, targetURL, authHeader string, bodyBytes, upstreamBody []byte, reqID string, start time.Time) {
+	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream)
+	defer cancel()
+
+	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, "POST", targetURL, bytes.NewReader(upstreamBody))
+	if err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
+		return
+	}
+	upstreamReq.Header.Set("Content-Type", "application/json")
+	if authHeader != "" {
+		upstreamReq.Header.Set("Authorization", authHeader)
+	}
+
+	resp, err := httpClient.Do(upstreamReq)
+	if err != nil {
+		slog.Error(providerLabel+" upstream error", "request_id", reqID, "error", sanitizeUpstreamError(err))
+		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
+		return
+	}
+	defer resp.Body.Close()
+
+	if req.Stream {
+		setSSEHeaders(w)
+		var onChunk onChunkFunc
+		if cfg.LogResponseBody {
+			onChunk = func(index int, data []byte) {
+				logger.LogChunk(ChunkLogEntry{
+					RequestID:  reqID,
+					ChunkIndex: index,
+					Data:       string(data),
+				})
+			}
+		}
+		if err := proxySSEStream(w, resp.Body, nil, onChunk); err != nil {
+			slog.Error("streaming error", "error", err)
+		}
+		logRequest(logger, cfg, reqID, r, provider, model, true, resp.StatusCode, start, string(bodyBytes), "", req.User, req.Metadata, nil)
+		return
+	}
+
+	respBody, err := readUpstreamBody(resp.Body, maxResponseSize)
+	if err != nil {
+		slog.Warn("failed to read "+providerLabel+" upstream response", "request_id", reqID, "error", err)
+		writeErrorJSON(w, http.StatusBadGateway, "failed to read upstream response", "server_error")
+		return
+	}
+	for k, vs := range resp.Header {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	if err := writeResponseBody(w, respBody); err != nil {
+		logResponseWriteError("failed to write "+providerLabel+" response", reqID, err)
+		return
+	}
+
+	var usage *OpenAIUsage
+	var openaiResp OpenAIChatResponse
+	if json.Unmarshal(respBody, &openaiResp) == nil {
+		usage = openaiResp.Usage
+	}
+	logRequest(logger, cfg, reqID, r, provider, model, false, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, req.Metadata, usage)
+}
+
 func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
 	apiKey := perModelCfg.APIKey
 	if apiKey == "" {
@@ -115,58 +181,7 @@ func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 	}
 	targetURL := baseURL + "/v1/chat/completions"
 
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(modifiedBody))
-	if err != nil {
-		writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
-		return
-	}
-	upstreamReq.Header.Set("Content-Type", "application/json")
-	upstreamReq.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := httpClient.Do(upstreamReq)
-	if err != nil {
-		slog.Error("openai upstream error", "request_id", reqID, "error", err)
-		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
-		return
-	}
-	defer resp.Body.Close()
-
-	if req.Stream {
-		// Stream SSE response directly
-		setSSEHeaders(w)
-		var onChunk onChunkFunc
-		if cfg.LogResponseBody {
-			onChunk = func(index int, data []byte) {
-				logger.LogChunk(ChunkLogEntry{
-					RequestID:  reqID,
-					ChunkIndex: index,
-					Data:       string(data),
-				})
-			}
-		}
-		if err := proxySSEStream(w, resp.Body, nil, onChunk); err != nil {
-			slog.Error("streaming error", "error", err)
-		}
-		logRequest(logger, cfg, reqID, r, "openai", model, true, resp.StatusCode, start, string(bodyBytes), "", req.User, req.Metadata, nil)
-	} else {
-		// Non-streaming: read full response and forward
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
-		for k, vs := range resp.Header {
-			for _, v := range vs {
-				w.Header().Add(k, v)
-			}
-		}
-		w.WriteHeader(resp.StatusCode)
-		w.Write(respBody)
-
-		// Extract usage from OpenAI response
-		var usage *OpenAIUsage
-		var openaiResp OpenAIChatResponse
-		if json.Unmarshal(respBody, &openaiResp) == nil {
-			usage = openaiResp.Usage
-		}
-		logRequest(logger, cfg, reqID, r, "openai", model, false, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, req.Metadata, usage)
-	}
+	forwardOpenAICompatChat(w, r, cfg, logger, req, "openai", "openai", model, targetURL, "Bearer "+apiKey, bodyBytes, modifiedBody, reqID, start)
 }
 
 // rewriteModelField replaces the model field value in the JSON body.
@@ -193,58 +208,11 @@ func handleOllamaChatProvider(w http.ResponseWriter, r *http.Request, cfg *Confi
 		baseURL = "http://localhost:11434"
 	}
 	targetURL := baseURL + "/v1/chat/completions"
-
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(modifiedBody))
-	if err != nil {
-		writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
-		return
-	}
-	upstreamReq.Header.Set("Content-Type", "application/json")
+	authHeader := ""
 	if apiKey := perModelCfg.APIKey; apiKey != "" {
-		upstreamReq.Header.Set("Authorization", "Bearer "+apiKey)
+		authHeader = "Bearer " + apiKey
 	}
-
-	resp, err := httpClient.Do(upstreamReq)
-	if err != nil {
-		slog.Error("ollama upstream error", "request_id", reqID, "error", err)
-		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
-		return
-	}
-	defer resp.Body.Close()
-
-	if req.Stream {
-		setSSEHeaders(w)
-		var onChunk onChunkFunc
-		if cfg.LogResponseBody {
-			onChunk = func(index int, data []byte) {
-				logger.LogChunk(ChunkLogEntry{
-					RequestID:  reqID,
-					ChunkIndex: index,
-					Data:       string(data),
-				})
-			}
-		}
-		if err := proxySSEStream(w, resp.Body, nil, onChunk); err != nil {
-			slog.Error("streaming error", "error", err)
-		}
-		logRequest(logger, cfg, reqID, r, "ollama_chat", model, true, resp.StatusCode, start, string(bodyBytes), "", req.User, req.Metadata, nil)
-	} else {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
-		for k, vs := range resp.Header {
-			for _, v := range vs {
-				w.Header().Add(k, v)
-			}
-		}
-		w.WriteHeader(resp.StatusCode)
-		w.Write(respBody)
-
-		var usage *OpenAIUsage
-		var openaiResp OpenAIChatResponse
-		if json.Unmarshal(respBody, &openaiResp) == nil {
-			usage = openaiResp.Usage
-		}
-		logRequest(logger, cfg, reqID, r, "ollama_chat", model, false, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, req.Metadata, usage)
-	}
+	forwardOpenAICompatChat(w, r, cfg, logger, req, "ollama_chat", "ollama", model, targetURL, authHeader, bodyBytes, modifiedBody, reqID, start)
 }
 
 func handleOpenRouterProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
@@ -266,55 +234,7 @@ func handleOpenRouterProvider(w http.ResponseWriter, r *http.Request, cfg *Confi
 	}
 	targetURL := baseURL + "/v1/chat/completions"
 
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(modifiedBody))
-	if err != nil {
-		writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
-		return
-	}
-	upstreamReq.Header.Set("Content-Type", "application/json")
-	upstreamReq.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := httpClient.Do(upstreamReq)
-	if err != nil {
-		slog.Error("openrouter upstream error", "request_id", reqID, "error", err)
-		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
-		return
-	}
-	defer resp.Body.Close()
-
-	if req.Stream {
-		setSSEHeaders(w)
-		var onChunk onChunkFunc
-		if cfg.LogResponseBody {
-			onChunk = func(index int, data []byte) {
-				logger.LogChunk(ChunkLogEntry{
-					RequestID:  reqID,
-					ChunkIndex: index,
-					Data:       string(data),
-				})
-			}
-		}
-		if err := proxySSEStream(w, resp.Body, nil, onChunk); err != nil {
-			slog.Error("streaming error", "error", err)
-		}
-		logRequest(logger, cfg, reqID, r, "openrouter", model, true, resp.StatusCode, start, string(bodyBytes), "", req.User, req.Metadata, nil)
-	} else {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
-		for k, vs := range resp.Header {
-			for _, v := range vs {
-				w.Header().Add(k, v)
-			}
-		}
-		w.WriteHeader(resp.StatusCode)
-		w.Write(respBody)
-
-		var usage *OpenAIUsage
-		var openaiResp OpenAIChatResponse
-		if json.Unmarshal(respBody, &openaiResp) == nil {
-			usage = openaiResp.Usage
-		}
-		logRequest(logger, cfg, reqID, r, "openrouter", model, false, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, req.Metadata, usage)
-	}
+	forwardOpenAICompatChat(w, r, cfg, logger, req, "openrouter", "openrouter", model, targetURL, "Bearer "+apiKey, bodyBytes, modifiedBody, reqID, start)
 }
 
 func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
@@ -340,16 +260,24 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 	if baseURL == "" {
 		baseURL = cfg.GeminiBaseURL
 	}
-	var targetURL string
+	extraQuery := map[string]string{}
 	if req.Stream {
-		targetURL = fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s",
-			baseURL, model, apiKey)
-	} else {
-		targetURL = fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s",
-			baseURL, model, apiKey)
+		extraQuery["alt"] = "sse"
+	}
+	action := "generateContent"
+	if req.Stream {
+		action = "streamGenerateContent"
+	}
+	targetURL, err := buildGeminiAPIURL(baseURL, model, action, apiKey, extraQuery)
+	if err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "failed to build gemini URL", "server_error")
+		return
 	}
 
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(geminiBody))
+	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream)
+	defer cancel()
+
+	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, "POST", targetURL, bytes.NewReader(geminiBody))
 	if err != nil {
 		writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
 		return
@@ -358,7 +286,7 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 
 	resp, err := httpClient.Do(upstreamReq)
 	if err != nil {
-		slog.Error("gemini upstream error", "request_id", reqID, "error", err)
+		slog.Error("gemini upstream error", "request_id", reqID, "error", sanitizeUpstreamError(err))
 		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
 		return
 	}
@@ -366,7 +294,12 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 
 	// If upstream returned error, log details server-side, return generic message to client
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+		respBody, err := readUpstreamBody(resp.Body, maxResponseSize)
+		if err != nil {
+			slog.Warn("failed to read gemini error response", "request_id", reqID, "error", err)
+			writeErrorJSON(w, http.StatusBadGateway, "failed to read upstream response", "server_error")
+			return
+		}
 		slog.Error("gemini API error", "request_id", reqID, "status", resp.StatusCode, "body", string(respBody))
 		writeErrorJSON(w, resp.StatusCode, "gemini API error", "server_error")
 		logRequest(logger, cfg, reqID, r, "gemini", model, req.Stream, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, req.Metadata, nil)
@@ -381,8 +314,9 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 }
 
 func handleGeminiNonStream(w http.ResponseWriter, resp *http.Response, cfg *Config, model, reqID string, logger *RequestLogger, r *http.Request, bodyBytes []byte, start time.Time, user string, metadata map[string]any) {
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	respBody, err := readUpstreamBody(resp.Body, maxResponseSize)
 	if err != nil {
+		slog.Warn("failed to read gemini upstream response", "request_id", reqID, "error", err)
 		writeErrorJSON(w, http.StatusBadGateway, "failed to read upstream response", "server_error")
 		return
 	}
@@ -398,7 +332,10 @@ func handleGeminiNonStream(w http.ResponseWriter, resp *http.Response, cfg *Conf
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(openaiBody)
+	if err := writeResponseBody(w, openaiBody); err != nil {
+		logResponseWriteError("failed to write gemini response", reqID, err)
+		return
+	}
 
 	logRequest(logger, cfg, reqID, r, "gemini", model, false, http.StatusOK, start, string(bodyBytes), string(openaiBody), user, metadata, openaiResp.Usage)
 }

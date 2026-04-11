@@ -1,18 +1,79 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
 const maxPassthroughRequestSize = 10 << 20 // 10MB
 
-// httpClient is used for all upstream requests with sensible timeouts.
+var errResponseBodyTooLarge = errors.New("upstream response body too large")
+
+const (
+	upstreamNonStreamTimeout      = 5 * time.Minute
+	upstreamDialTimeout           = 10 * time.Second
+	upstreamKeepAlive             = 30 * time.Second
+	upstreamTLSHandshakeTimeout   = 10 * time.Second
+	upstreamResponseHeaderTimeout = 30 * time.Second
+	upstreamExpectContinueTimeout = 1 * time.Second
+	upstreamIdleConnTimeout       = 90 * time.Second
+)
+
+// httpClient is used for all upstream requests.
+// Streaming responses must not be bounded by an absolute client timeout because
+// http.Client.Timeout includes the full response body read.
 var httpClient = &http.Client{
-	Timeout: 5 * time.Minute,
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   upstreamDialTimeout,
+			KeepAlive: upstreamKeepAlive,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       upstreamIdleConnTimeout,
+		TLSHandshakeTimeout:   upstreamTLSHandshakeTimeout,
+		ExpectContinueTimeout: upstreamExpectContinueTimeout,
+		ResponseHeaderTimeout: upstreamResponseHeaderTimeout,
+	},
+}
+
+func withUpstreamTimeout(parent context.Context, enable bool) (context.Context, context.CancelFunc) {
+	if !enable {
+		return parent, func() {}
+	}
+	return context.WithTimeout(parent, upstreamNonStreamTimeout)
+}
+
+func readUpstreamBody(body io.Reader, maxSize int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, maxSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxSize {
+		return nil, errResponseBodyTooLarge
+	}
+	return data, nil
+}
+
+func writeResponseBody(w http.ResponseWriter, body []byte) error {
+	if _, err := w.Write(body); err != nil {
+		return err
+	}
+	return nil
+}
+
+func logResponseWriteError(msg, reqID string, err error) {
+	slog.Warn(msg, "request_id", reqID, "error", err)
 }
 
 // forwardRequest forwards an HTTP request to targetURL.
@@ -87,6 +148,53 @@ func forwardRequest(w http.ResponseWriter, r *http.Request, targetURL string, mo
 
 func isSSE(resp *http.Response) bool {
 	return strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
+}
+
+func buildGeminiAPIURL(baseURL, model, action, apiKey string, extraQuery map[string]string) (string, error) {
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return "", err
+	}
+
+	base.Path = strings.TrimRight(base.Path, "/") + fmt.Sprintf("/v1beta/models/%s:%s", model, action)
+	query := base.Query()
+	query.Set("key", apiKey)
+	for k, v := range extraQuery {
+		query.Set(k, v)
+	}
+	base.RawQuery = query.Encode()
+
+	return base.String(), nil
+}
+
+func sanitizeUpstreamError(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return fmt.Sprintf("%s %s: %v", urlErr.Op, redactSensitiveURL(urlErr.URL), urlErr.Err)
+	}
+
+	return err.Error()
+}
+
+func redactSensitiveURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+
+	query := parsed.Query()
+	for _, key := range []string{"key", "api_key", "access_token", "token"} {
+		if _, ok := query[key]; ok {
+			query.Set(key, "REDACTED")
+		}
+	}
+	parsed.RawQuery = query.Encode()
+
+	return parsed.String()
 }
 
 // writeErrorJSON writes an OpenAI-format error response.

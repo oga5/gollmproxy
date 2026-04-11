@@ -14,6 +14,48 @@ func registerEmbeddingsRoute(mux *http.ServeMux, cfg *Config, logger *RequestLog
 	mux.HandleFunc("POST /v1/embeddings", handleEmbeddings(cfg, logger))
 }
 
+func forwardOpenAICompatEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIEmbeddingRequest, provider, providerLabel, model, targetURL, authHeader string, bodyBytes, upstreamBody []byte, reqID string, start time.Time) {
+	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), true)
+	defer cancel()
+
+	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, "POST", targetURL, bytes.NewReader(upstreamBody))
+	if err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
+		return
+	}
+	upstreamReq.Header.Set("Content-Type", "application/json")
+	if authHeader != "" {
+		upstreamReq.Header.Set("Authorization", authHeader)
+	}
+
+	resp, err := httpClient.Do(upstreamReq)
+	if err != nil {
+		slog.Error(providerLabel+" embeddings upstream error", "request_id", reqID, "error", sanitizeUpstreamError(err))
+		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, err := readUpstreamBody(resp.Body, maxResponseSize)
+	if err != nil {
+		slog.Warn("failed to read "+providerLabel+" embeddings response", "request_id", reqID, "error", err)
+		writeErrorJSON(w, http.StatusBadGateway, "failed to read upstream response", "server_error")
+		return
+	}
+	for k, vs := range resp.Header {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	if err := writeResponseBody(w, respBody); err != nil {
+		logResponseWriteError("failed to write "+providerLabel+" embeddings response", reqID, err)
+		return
+	}
+
+	logEmbeddingRequest(logger, cfg, reqID, r, provider, model, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User)
+}
+
 func handleEmbeddings(cfg *Config, logger *RequestLogger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -95,32 +137,7 @@ func handleOpenAIEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 	}
 	targetURL := baseURL + "/v1/embeddings"
 
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(modifiedBody))
-	if err != nil {
-		writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
-		return
-	}
-	upstreamReq.Header.Set("Content-Type", "application/json")
-	upstreamReq.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := httpClient.Do(upstreamReq)
-	if err != nil {
-		slog.Error("openai embeddings upstream error", "request_id", reqID, "error", err)
-		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
-		return
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
-	for k, vs := range resp.Header {
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	w.Write(respBody)
-
-	logEmbeddingRequest(logger, cfg, reqID, r, "openai", model, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User)
+	forwardOpenAICompatEmbeddings(w, r, cfg, logger, req, "openai", "openai", model, targetURL, "Bearer "+apiKey, bodyBytes, modifiedBody, reqID, start)
 }
 
 // handleGeminiEmbeddings converts OpenAI embedding request to Gemini format and back.
@@ -158,9 +175,16 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 		}
 		geminiBody, _ := json.Marshal(geminiReq)
 
-		targetURL := fmt.Sprintf("%s/v1beta/models/%s:embedContent?key=%s", baseURL, model, apiKey)
+		targetURL, err := buildGeminiAPIURL(baseURL, model, "embedContent", apiKey, nil)
+		if err != nil {
+			writeErrorJSON(w, http.StatusInternalServerError, "failed to build gemini URL", "server_error")
+			return
+		}
 
-		upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(geminiBody))
+		upstreamCtx, cancel := withUpstreamTimeout(r.Context(), true)
+		defer cancel()
+
+		upstreamReq, err := http.NewRequestWithContext(upstreamCtx, "POST", targetURL, bytes.NewReader(geminiBody))
 		if err != nil {
 			writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
 			return
@@ -169,13 +193,18 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 
 		resp, err := httpClient.Do(upstreamReq)
 		if err != nil {
-			slog.Error("gemini embeddings upstream error", "request_id", reqID, "error", err)
+			slog.Error("gemini embeddings upstream error", "request_id", reqID, "error", sanitizeUpstreamError(err))
 			writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
 			return
 		}
 		defer resp.Body.Close()
 
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+		respBody, err := readUpstreamBody(resp.Body, maxResponseSize)
+		if err != nil {
+			slog.Warn("failed to read gemini embeddings response", "request_id", reqID, "error", err)
+			writeErrorJSON(w, http.StatusBadGateway, "failed to read upstream response", "server_error")
+			return
+		}
 		if resp.StatusCode != http.StatusOK {
 			slog.Error("gemini embeddings API error", "request_id", reqID, "status", resp.StatusCode, "body", string(respBody))
 			writeErrorJSON(w, resp.StatusCode, "gemini API error", "server_error")
@@ -193,7 +222,10 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(openaiBody)
+		if err := writeResponseBody(w, openaiBody); err != nil {
+			logResponseWriteError("failed to write gemini embeddings response", reqID, err)
+			return
+		}
 
 		logEmbeddingRequest(logger, cfg, reqID, r, "gemini", model, http.StatusOK, start, string(bodyBytes), string(openaiBody), req.User)
 	} else {
@@ -210,9 +242,16 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 		geminiReq := GeminiBatchEmbedContentsRequest{Requests: requests}
 		geminiBody, _ := json.Marshal(geminiReq)
 
-		targetURL := fmt.Sprintf("%s/v1beta/models/%s:batchEmbedContents?key=%s", baseURL, model, apiKey)
+		targetURL, err := buildGeminiAPIURL(baseURL, model, "batchEmbedContents", apiKey, nil)
+		if err != nil {
+			writeErrorJSON(w, http.StatusInternalServerError, "failed to build gemini URL", "server_error")
+			return
+		}
 
-		upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(geminiBody))
+		upstreamCtx, cancel := withUpstreamTimeout(r.Context(), true)
+		defer cancel()
+
+		upstreamReq, err := http.NewRequestWithContext(upstreamCtx, "POST", targetURL, bytes.NewReader(geminiBody))
 		if err != nil {
 			writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
 			return
@@ -221,13 +260,18 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 
 		resp, err := httpClient.Do(upstreamReq)
 		if err != nil {
-			slog.Error("gemini batch embeddings upstream error", "request_id", reqID, "error", err)
+			slog.Error("gemini batch embeddings upstream error", "request_id", reqID, "error", sanitizeUpstreamError(err))
 			writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
 			return
 		}
 		defer resp.Body.Close()
 
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+		respBody, err := readUpstreamBody(resp.Body, maxResponseSize)
+		if err != nil {
+			slog.Warn("failed to read gemini batch embeddings response", "request_id", reqID, "error", err)
+			writeErrorJSON(w, http.StatusBadGateway, "failed to read upstream response", "server_error")
+			return
+		}
 		if resp.StatusCode != http.StatusOK {
 			slog.Error("gemini batch embeddings API error", "request_id", reqID, "status", resp.StatusCode, "body", string(respBody))
 			writeErrorJSON(w, resp.StatusCode, "gemini API error", "server_error")
@@ -245,7 +289,10 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(openaiBody)
+		if err := writeResponseBody(w, openaiBody); err != nil {
+			logResponseWriteError("failed to write gemini batch embeddings response", reqID, err)
+			return
+		}
 
 		logEmbeddingRequest(logger, cfg, reqID, r, "gemini", model, http.StatusOK, start, string(bodyBytes), string(openaiBody), req.User)
 	}
@@ -260,35 +307,11 @@ func handleOllamaEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 		baseURL = "http://localhost:11434"
 	}
 	targetURL := baseURL + "/v1/embeddings"
-
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(modifiedBody))
-	if err != nil {
-		writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
-		return
-	}
-	upstreamReq.Header.Set("Content-Type", "application/json")
+	authHeader := ""
 	if apiKey := perModelCfg.APIKey; apiKey != "" {
-		upstreamReq.Header.Set("Authorization", "Bearer "+apiKey)
+		authHeader = "Bearer " + apiKey
 	}
-
-	resp, err := httpClient.Do(upstreamReq)
-	if err != nil {
-		slog.Error("ollama embeddings upstream error", "request_id", reqID, "error", err)
-		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
-		return
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
-	for k, vs := range resp.Header {
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	w.Write(respBody)
-
-	logEmbeddingRequest(logger, cfg, reqID, r, "ollama_chat", model, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User)
+	forwardOpenAICompatEmbeddings(w, r, cfg, logger, req, "ollama_chat", "ollama", model, targetURL, authHeader, bodyBytes, modifiedBody, reqID, start)
 }
 
 // handleOpenRouterEmbeddings forwards embedding request to OpenRouter.
@@ -310,32 +333,7 @@ func handleOpenRouterEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Con
 	}
 	targetURL := baseURL + "/v1/embeddings"
 
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(modifiedBody))
-	if err != nil {
-		writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
-		return
-	}
-	upstreamReq.Header.Set("Content-Type", "application/json")
-	upstreamReq.Header.Set("Authorization", "Bearer "+apiKey)
-
-	resp, err := httpClient.Do(upstreamReq)
-	if err != nil {
-		slog.Error("openrouter embeddings upstream error", "request_id", reqID, "error", err)
-		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
-		return
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
-	for k, vs := range resp.Header {
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	w.Write(respBody)
-
-	logEmbeddingRequest(logger, cfg, reqID, r, "openrouter", model, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User)
+	forwardOpenAICompatEmbeddings(w, r, cfg, logger, req, "openrouter", "openrouter", model, targetURL, "Bearer "+apiKey, bodyBytes, modifiedBody, reqID, start)
 }
 
 // normalizeEmbeddingInput converts the input field (string or []string) to []string.
