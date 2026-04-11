@@ -45,7 +45,8 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 		}
 
 		// Resolve model alias (model_name -> provider-prefixed model)
-		modelField := req.Model
+		requestedModel := req.Model
+		modelField := requestedModel
 		if mapped, ok := cfg.ModelAliases[modelField]; ok {
 			modelField = mapped
 		}
@@ -55,7 +56,9 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 
 		// Look up per-model config overrides
 		var perModelCfg ModelConfig
-		if mc, ok := cfg.ModelConfigs[modelField]; ok {
+		if mc, ok := cfg.ModelConfigs[requestedModel]; ok {
+			perModelCfg = mc
+		} else if mc, ok := cfg.ModelConfigs[modelField]; ok {
 			perModelCfg = mc
 		}
 
@@ -75,6 +78,8 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 			handleOllamaChatProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
 		case "openrouter":
 			handleOpenRouterProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
+		case "bedrock":
+			handleBedrockProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
 		default:
 			writeErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("unsupported provider: %s", provider), "invalid_request_error")
 		}

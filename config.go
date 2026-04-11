@@ -21,20 +21,24 @@ type Config struct {
 	KeyHeaderName      string
 	TrustedProxyHeader string
 
-	OpenAIAPIKey      string
-	GeminiAPIKey      string
-	TavilyAPIKey      string
-	OpenRouterAPIKey  string
+	OpenAIAPIKey            string
+	GeminiAPIKey            string
+	TavilyAPIKey            string
+	OpenRouterAPIKey        string
+	BedrockRegion           string
+	BedrockIncludeReasoning bool
 
-	OpenAIBaseURL      string
-	GeminiBaseURL      string
-	TavilyBaseURL      string
-	OpenRouterBaseURL  string
+	OpenAIBaseURL     string
+	GeminiBaseURL     string
+	TavilyBaseURL     string
+	OpenRouterBaseURL string
 
 	// ModelAliases maps model_name to the provider-prefixed model (e.g. "gemini-2.5-flash" -> "gemini/gemini-2.5-flash")
 	ModelAliases map[string]string
 
-	// ModelConfigs maps provider-prefixed model to per-model config overrides (api_base, api_key)
+	// ModelConfigs maps request model keys to per-model config overrides.
+	// If model_name is configured, that alias is used as the key so multiple aliases can
+	// target the same upstream model with different settings.
 	ModelConfigs map[string]ModelConfig
 
 	// EmbeddingModels is the set of provider-prefixed models that have mode: embedding in model_info.
@@ -48,6 +52,7 @@ type Config struct {
 type ModelConfig struct {
 	APIKey  string
 	APIBase string
+	Region  string
 }
 
 // PassThroughEndpoint defines a custom pass-through proxy endpoint.
@@ -60,11 +65,11 @@ type PassThroughEndpoint struct {
 
 // YAML config types
 type yamlConfig struct {
-	ModelList                  []modelListEntry     `yaml:"model_list"`
-	GeneralSettings            generalSettings      `yaml:"general_settings"`
-	EnvironmentVariables       map[string]string    `yaml:"environment_variables"`
-	SearchTools                []searchToolEntry    `yaml:"search_tools"`
-	GoogleAIStudioPassthrough  passthroughAPIConfig `yaml:"google_ai_studio_passthrough"`
+	ModelList                 []modelListEntry     `yaml:"model_list"`
+	GeneralSettings           generalSettings      `yaml:"general_settings"`
+	EnvironmentVariables      map[string]string    `yaml:"environment_variables"`
+	SearchTools               []searchToolEntry    `yaml:"search_tools"`
+	GoogleAIStudioPassthrough passthroughAPIConfig `yaml:"google_ai_studio_passthrough"`
 }
 
 type modelListEntry struct {
@@ -81,17 +86,19 @@ type modelParams struct {
 	Model   string `yaml:"model"`
 	APIKey  string `yaml:"api_key"`
 	APIBase string `yaml:"api_base"`
+	Region  string `yaml:"region"`
 }
 
 type generalSettings struct {
-	Port                 int                        `yaml:"port"`
-	LogFile              string                     `yaml:"log_file"`
-	LogRequestBody       *bool                      `yaml:"log_request_body"`
-	LogResponseBody      *bool                      `yaml:"log_response_body"`
-	MasterKey            string                     `yaml:"master_key"`
-	KeyHeaderName        string                     `yaml:"litellm_key_header_name"`
-	TrustedProxyHeader   string                     `yaml:"trusted_proxy_header"`
-	PassThroughEndpoints []yamlPassThroughEndpoint  `yaml:"pass_through_endpoints"`
+	Port                    int                       `yaml:"port"`
+	LogFile                 string                    `yaml:"log_file"`
+	LogRequestBody          *bool                     `yaml:"log_request_body"`
+	LogResponseBody         *bool                     `yaml:"log_response_body"`
+	BedrockIncludeReasoning *bool                     `yaml:"bedrock_include_reasoning"`
+	MasterKey               string                    `yaml:"master_key"`
+	KeyHeaderName           string                    `yaml:"litellm_key_header_name"`
+	TrustedProxyHeader      string                    `yaml:"trusted_proxy_header"`
+	PassThroughEndpoints    []yamlPassThroughEndpoint `yaml:"pass_through_endpoints"`
 }
 
 type yamlPassThroughEndpoint struct {
@@ -102,8 +109,8 @@ type yamlPassThroughEndpoint struct {
 }
 
 type searchToolEntry struct {
-	SearchToolName string             `yaml:"search_tool_name"`
-	Params         searchToolParams   `yaml:"litellm_params"`
+	SearchToolName string           `yaml:"search_tool_name"`
+	Params         searchToolParams `yaml:"litellm_params"`
 }
 
 type searchToolParams struct {
@@ -127,14 +134,14 @@ func LoadConfig() *Config {
 	var configFile string
 
 	cfg := &Config{
-		Port:            8080,
-		LogFile:         "gollmproxy.log",
-		LogRequestBody:  true,
-		LogResponseBody: true,
-		OpenAIBaseURL:      "https://api.openai.com",
-		GeminiBaseURL:      "https://generativelanguage.googleapis.com",
-		TavilyBaseURL:      "https://api.tavily.com",
-		OpenRouterBaseURL:  "https://openrouter.ai/api",
+		Port:              8080,
+		LogFile:           "gollmproxy.log",
+		LogRequestBody:    true,
+		LogResponseBody:   true,
+		OpenAIBaseURL:     "https://api.openai.com",
+		GeminiBaseURL:     "https://generativelanguage.googleapis.com",
+		TavilyBaseURL:     "https://api.tavily.com",
+		OpenRouterBaseURL: "https://openrouter.ai/api",
 	}
 
 	flag.StringVar(&configFile, "config", "", "config file path (YAML)")
@@ -171,6 +178,11 @@ func LoadConfig() *Config {
 	}
 	if v := os.Getenv("OPENROUTER_API_KEY"); v != "" {
 		cfg.OpenRouterAPIKey = v
+	}
+	if v := os.Getenv("AWS_REGION"); v != "" {
+		cfg.BedrockRegion = v
+	} else if v := os.Getenv("AWS_DEFAULT_REGION"); v != "" {
+		cfg.BedrockRegion = v
 	}
 
 	if v := os.Getenv("OPENAI_BASE_URL"); v != "" {
@@ -231,6 +243,9 @@ func loadYAMLConfig(path string, cfg *Config) {
 	if lc.GeneralSettings.LogResponseBody != nil {
 		cfg.LogResponseBody = *lc.GeneralSettings.LogResponseBody
 	}
+	if lc.GeneralSettings.BedrockIncludeReasoning != nil {
+		cfg.BedrockIncludeReasoning = *lc.GeneralSettings.BedrockIncludeReasoning
+	}
 
 	// Load pass-through endpoints
 	for _, ep := range lc.GeneralSettings.PassThroughEndpoints {
@@ -281,6 +296,7 @@ func loadYAMLConfig(path string, cfg *Config) {
 		model := entry.Params.Model
 		apiKey := resolveEnvRef(entry.Params.APIKey)
 		apiBase := entry.Params.APIBase
+		region := resolveEnvRef(entry.Params.Region)
 
 		// Register model_name -> provider-prefixed model alias
 		if entry.ModelName != "" && model != "" {
@@ -295,11 +311,17 @@ func loadYAMLConfig(path string, cfg *Config) {
 			}
 		}
 
-		// Store per-model config overrides
-		if model != "" && (apiKey != "" || apiBase != "") {
-			cfg.ModelConfigs[model] = ModelConfig{
+		// Store per-model config overrides. model_name takes precedence as the lookup key
+		// so multiple aliases can point at the same upstream model without clobbering each other.
+		configKey := model
+		if entry.ModelName != "" {
+			configKey = entry.ModelName
+		}
+		if configKey != "" && (apiKey != "" || apiBase != "" || region != "") {
+			cfg.ModelConfigs[configKey] = ModelConfig{
 				APIKey:  apiKey,
 				APIBase: apiBase,
+				Region:  region,
 			}
 		}
 
@@ -324,6 +346,10 @@ func loadYAMLConfig(path string, cfg *Config) {
 			}
 			if apiBase != "" {
 				cfg.OpenRouterBaseURL = apiBase
+			}
+		case strings.HasPrefix(model, "bedrock/"):
+			if cfg.BedrockRegion == "" && region != "" {
+				cfg.BedrockRegion = region
 			}
 		}
 	}

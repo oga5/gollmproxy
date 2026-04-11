@@ -10,10 +10,10 @@ model_list:
     litellm_params:
       model: gemini/gemini-2.5-flash
       api_key: os.environ/GEMINI_API_KEY
-  - model_name: gpt-oss
+  - model_name: gpt-oss-20b
     litellm_params:
-      model: ollama_chat/gpt-oss:20b
-      api_base: http://localhost:11434
+      model: bedrock/openai.gpt-oss-20b-1:0
+      region: ap-northeast-1
   - model_name: text-embedding-3-small
     litellm_params:
       model: openai/text-embedding-3-small
@@ -31,12 +31,14 @@ environment_variables:
   # OPENAI_API_KEY: "sk-..."
   # GEMINI_API_KEY: "AIza..."
   # TAVILY_API_KEY: "tvly-..."
+  # AWS_REGION: "ap-northeast-1"
 
 general_settings:
   port: 8080
   log_file: "gollmproxy.log"
   log_request_body: true
   log_response_body: true
+  bedrock_include_reasoning: false
   # pass_through_endpoints:
   #   - path: /custom-api
   #     target: https://api.example.com

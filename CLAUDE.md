@@ -23,6 +23,7 @@ server.go                     HTTPサーバー, ルーティング登録, ミド
 log.go                        JSONL リクエストロガー (RequestLogger, LogEntry)
 proxy.go                      汎用HTTP転送 (forwardRequest), エラーレスポンスヘルパー
 openai_compat.go              POST /v1/chat/completions ハンドラ (プロバイダ振り分け, OpenAI/Gemini/Ollama処理)
+bedrock.go                    Bedrock Runtime ハンドラ (OpenAI互換リクエストを InvokeModel に転送)
 passthrough.go                /openai/*, /gemini/*, /tavily/* パススルーハンドラ
 convert_openai_to_gemini.go   OpenAI → Gemini リクエスト変換
 convert_gemini_to_openai.go   Gemini → OpenAI レスポンス変換 (非ストリーミング/ストリーミング)
@@ -45,7 +46,8 @@ config.yaml.example           設定ファイル例
   │       ├─ provider=openai → OpenAI APIにそのまま転送 (modelフィールドのプレフィックス除去のみ)
   │       ├─ provider=gemini → convert_openai_to_gemini.go で変換 → Gemini API
   │       │                     → convert_gemini_to_openai.go でレスポンス変換
-  │       └─ provider=ollama_chat → OpenAI互換APIとして転送 (APIキー不要, デフォルト: localhost:11434)
+  │       ├─ provider=ollama_chat → OpenAI互換APIとして転送 (APIキー不要, デフォルト: localhost:11434)
+  │       └─ provider=bedrock → AWS Bedrock Runtime InvokeModel に転送
   │
   ├─ /openai/* ──→ passthrough.go → api.openai.com (Authorization: Bearer)
   ├─ /gemini/* ──→ passthrough.go → generativelanguage.googleapis.com (?key=)
@@ -92,6 +94,7 @@ recoveryMiddleware → requestIDMiddleware → loggingMiddleware → [authMiddle
 | Gemini | `?key=$GEMINI_API_KEY` クエリパラメータ |
 | Tavily | `Authorization: Bearer $TAVILY_API_KEY` ヘッダ |
 | Ollama Chat | APIキー不要 (設定時は `Authorization: Bearer` ヘッダ) |
+| Bedrock | AWS SDK の標準認証情報チェーン + `region` |
 
 ## 設定ファイル形式
 
@@ -112,10 +115,10 @@ model_list:
     litellm_params:
       model: gemini/gemini-2.5-flash
       api_key: os.environ/GEMINI_API_KEY
-  - model_name: gpt-oss
+  - model_name: gpt-oss-20b
     litellm_params:
-      model: ollama_chat/gpt-oss:20b
-      api_base: http://localhost:11434
+      model: bedrock/openai.gpt-oss-20b-1:0
+      region: ap-northeast-1
 
 search_tools:
   - search_tool_name: tavily-search
@@ -135,7 +138,8 @@ environment_variables:
 - `general_settings`: ポート・ログファイル・マスターキー認証設定
   - `master_key`: プロキシへのアクセスを制限するAPIキー（`os.environ/` 構文対応）
   - `litellm_key_header_name`: 認証ヘッダ名（未設定時は `Authorization`）
-- `model_list`: `litellm_params.model` のプレフィックス (`openai/`, `gemini/`, `ollama_chat/`) でプロバイダ判定。`api_base` はモデル毎に設定可能
+  - `bedrock_include_reasoning`: Bedrock 応答中の `<reasoning>...</reasoning>` を返すか（デフォルト: false）
+- `model_list`: `litellm_params.model` のプレフィックス (`openai/`, `gemini/`, `ollama_chat/`, `bedrock/`) でプロバイダ判定。`api_base` はモデル毎に設定可能。Bedrock は `region` を利用
 - `search_tools`: 検索ツール設定（Tavily等）。`search_provider` でプロバイダ判定
 - `google_ai_studio_passthrough`: Geminiパススルー用APIキー設定
 - `environment_variables`: YAMLからOS環境変数をセット（既存の環境変数が優先）
@@ -149,7 +153,8 @@ environment_variables:
 
 - `gopkg.in/yaml.v3` - YAML設定ファイルパース
 - `github.com/google/uuid` - リクエストID生成
-- その他は Go 標準ライブラリのみ
+- `github.com/aws/aws-sdk-go-v2/config` - AWS認証情報・リージョン解決
+- `github.com/aws/aws-sdk-go-v2/service/bedrockruntime` - Bedrock Runtime InvokeModel
 
 ## エラーレスポンス形式
 

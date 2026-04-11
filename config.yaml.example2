@@ -1,6 +1,7 @@
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   litellm_key_header_name: X-Litellm-Api-Key
+  bedrock_include_reasoning: false
 
 model_list:
   - model_name: gemini-flash
@@ -19,6 +20,10 @@ model_list:
     litellm_params:
       model: gemini/gemini-3-flash-preview
       api_key: os.environ/GEMINI_API_KEY
+  - model_name: gpt-oss-20b
+    litellm_params:
+      model: bedrock/openai.gpt-oss-20b-1:0
+      region: ap-northeast-1
 
 search_tools:
   - search_tool_name: tavily-search

@@ -33,7 +33,8 @@ func handleEmbeddings(cfg *Config, logger *RequestLogger) http.HandlerFunc {
 		}
 
 		// Resolve model alias
-		modelField := req.Model
+		requestedModel := req.Model
+		modelField := requestedModel
 		if mapped, ok := cfg.ModelAliases[modelField]; ok {
 			modelField = mapped
 		}
@@ -47,7 +48,9 @@ func handleEmbeddings(cfg *Config, logger *RequestLogger) http.HandlerFunc {
 		provider, model := parseModelPrefix(modelField)
 
 		var perModelCfg ModelConfig
-		if mc, ok := cfg.ModelConfigs[modelField]; ok {
+		if mc, ok := cfg.ModelConfigs[requestedModel]; ok {
+			perModelCfg = mc
+		} else if mc, ok := cfg.ModelConfigs[modelField]; ok {
 			perModelCfg = mc
 		}
 
