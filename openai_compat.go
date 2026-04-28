@@ -172,8 +172,8 @@ func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 		return
 	}
 
-	// Rewrite model field (strip provider prefix)
-	modifiedBody := rewriteModelField(bodyBytes, model)
+	// Rewrite model field (strip provider prefix) and merge per-model extra params
+	modifiedBody := mergeExtraParams(rewriteModelField(bodyBytes, model), perModelCfg.ExtraParams)
 
 	baseURL := perModelCfg.APIBase
 	if baseURL == "" {
@@ -199,9 +199,33 @@ func rewriteModelField(body []byte, newModel string) []byte {
 	return result
 }
 
+// mergeExtraParams injects per-model config parameters into the JSON request body.
+// Config values always take precedence over any client-provided values for the same key.
+func mergeExtraParams(body []byte, extraParams map[string]interface{}) []byte {
+	if len(extraParams) == 0 {
+		return body
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return body
+	}
+	for k, v := range extraParams {
+		b, err := json.Marshal(v)
+		if err != nil {
+			continue
+		}
+		raw[k] = b
+	}
+	result, err := json.Marshal(raw)
+	if err != nil {
+		return body
+	}
+	return result
+}
+
 func handleOllamaChatProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
-	// Rewrite model field (strip provider prefix)
-	modifiedBody := rewriteModelField(bodyBytes, model)
+	// Rewrite model field (strip provider prefix) and merge per-model extra params
+	modifiedBody := mergeExtraParams(rewriteModelField(bodyBytes, model), perModelCfg.ExtraParams)
 
 	baseURL := perModelCfg.APIBase
 	if baseURL == "" {
@@ -225,8 +249,8 @@ func handleOpenRouterProvider(w http.ResponseWriter, r *http.Request, cfg *Confi
 		return
 	}
 
-	// Model name is passed as-is (e.g. "stepfun/step-3.5-flash:free")
-	modifiedBody := rewriteModelField(bodyBytes, model)
+	// Model name is passed as-is (e.g. "stepfun/step-3.5-flash:free"), merge per-model extra params
+	modifiedBody := mergeExtraParams(rewriteModelField(bodyBytes, model), perModelCfg.ExtraParams)
 
 	baseURL := perModelCfg.APIBase
 	if baseURL == "" {

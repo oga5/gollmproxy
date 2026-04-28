@@ -135,6 +135,40 @@ func TestChatCompletionsBedrockForwardsOpenAIBodyWithStrippedPrefix(t *testing.T
 	}
 }
 
+func TestChatCompletionsBedrockExtraParamsMergedIntoBody(t *testing.T) {
+	fake := &fakeBedrockClient{
+		invokeOutput: []byte(`{"choices":[]}`),
+	}
+	withFakeBedrockClient(t, fake)
+
+	cfg := &Config{
+		ModelAliases: map[string]string{"gpt-oss-20b": "bedrock/openai.gpt-oss-20b-1:0"},
+		ModelConfigs: map[string]ModelConfig{
+			"gpt-oss-20b": {
+				Region:      "ap-northeast-1",
+				ExtraParams: map[string]interface{}{"service_tier": "flex"},
+			},
+		},
+	}
+	handler := newHandlerWithConfig(t, cfg)
+
+	rr := postJSON(t, handler, "/v1/chat/completions", map[string]any{
+		"model":    "gpt-oss-20b",
+		"messages": []map[string]string{{"role": "user", "content": "hi"}},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var forwarded map[string]any
+	if err := json.Unmarshal(fake.invokeInput.Body, &forwarded); err != nil {
+		t.Fatalf("failed to unmarshal forwarded body: %v", err)
+	}
+	if forwarded["service_tier"] != "flex" {
+		t.Fatalf("expected service_tier=flex in forwarded body, got %v", forwarded["service_tier"])
+	}
+}
+
 func TestChatCompletionsBedrockFallsBackToGlobalRegion(t *testing.T) {
 	fake := &fakeBedrockClient{
 		invokeOutput: []byte(`{"choices":[]}`),

@@ -50,9 +50,10 @@ type Config struct {
 
 // ModelConfig holds per-model configuration overrides.
 type ModelConfig struct {
-	APIKey  string
-	APIBase string
-	Region  string
+	APIKey      string
+	APIBase     string
+	Region      string
+	ExtraParams map[string]interface{}
 }
 
 // PassThroughEndpoint defines a custom pass-through proxy endpoint.
@@ -83,10 +84,11 @@ type modelInfo struct {
 }
 
 type modelParams struct {
-	Model   string `yaml:"model"`
-	APIKey  string `yaml:"api_key"`
-	APIBase string `yaml:"api_base"`
-	Region  string `yaml:"region"`
+	Model       string                 `yaml:"model"`
+	APIKey      string                 `yaml:"api_key"`
+	APIBase     string                 `yaml:"api_base"`
+	Region      string                 `yaml:"region"`
+	ExtraParams map[string]interface{} `yaml:"extra_params"`
 }
 
 type generalSettings struct {
@@ -317,11 +319,12 @@ func loadYAMLConfig(path string, cfg *Config) {
 		if entry.ModelName != "" {
 			configKey = entry.ModelName
 		}
-		if configKey != "" && (apiKey != "" || apiBase != "" || region != "") {
+		if configKey != "" && (apiKey != "" || apiBase != "" || region != "" || len(entry.Params.ExtraParams) > 0) {
 			cfg.ModelConfigs[configKey] = ModelConfig{
-				APIKey:  apiKey,
-				APIBase: apiBase,
-				Region:  region,
+				APIKey:      apiKey,
+				APIBase:     apiBase,
+				Region:      region,
+				ExtraParams: entry.Params.ExtraParams,
 			}
 		}
 
