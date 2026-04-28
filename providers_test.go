@@ -190,6 +190,74 @@ func TestChatCompletionsInvalidModelNameRejected(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsOpenAIExtraParamsMergedIntoBody(t *testing.T) {
+	upstreamResp := `{"id":"x","object":"chat.completion","created":1,"model":"gpt-4o","choices":[]}`
+	upstream, captured := newCaptureUpstream(t, http.StatusOK, "application/json", upstreamResp)
+
+	cfg := &Config{
+		ModelAliases: map[string]string{"gpt-4o-flex": "openai/gpt-4o"},
+		ModelConfigs: map[string]ModelConfig{
+			"gpt-4o-flex": {
+				APIKey:      "test-key",
+				APIBase:     upstream.URL,
+				ExtraParams: map[string]interface{}{"service_tier": "flex"},
+			},
+		},
+	}
+	handler := newHandlerWithConfig(t, cfg)
+
+	rr := postJSON(t, handler, "/v1/chat/completions", map[string]any{
+		"model":    "gpt-4o-flex",
+		"messages": []map[string]string{{"role": "user", "content": "hi"}},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var forwarded map[string]any
+	if err := json.Unmarshal(captured.Body, &forwarded); err != nil {
+		t.Fatalf("failed to unmarshal forwarded body: %v", err)
+	}
+	if forwarded["service_tier"] != "flex" {
+		t.Fatalf("expected service_tier=flex in forwarded body, got %v", forwarded["service_tier"])
+	}
+}
+
+func TestChatCompletionsOpenAIExtraParamsOverrideClientValues(t *testing.T) {
+	upstreamResp := `{"id":"x","object":"chat.completion","created":1,"model":"gpt-4o","choices":[]}`
+	upstream, captured := newCaptureUpstream(t, http.StatusOK, "application/json", upstreamResp)
+
+	cfg := &Config{
+		ModelAliases: map[string]string{"gpt-4o-flex": "openai/gpt-4o"},
+		ModelConfigs: map[string]ModelConfig{
+			"gpt-4o-flex": {
+				APIKey:      "test-key",
+				APIBase:     upstream.URL,
+				ExtraParams: map[string]interface{}{"service_tier": "flex"},
+			},
+		},
+	}
+	handler := newHandlerWithConfig(t, cfg)
+
+	// Client sends service_tier=default, config should override with flex
+	rr := postJSON(t, handler, "/v1/chat/completions", map[string]any{
+		"model":        "gpt-4o-flex",
+		"messages":     []map[string]string{{"role": "user", "content": "hi"}},
+		"service_tier": "default",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unexpected status %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var forwarded map[string]any
+	if err := json.Unmarshal(captured.Body, &forwarded); err != nil {
+		t.Fatalf("failed to unmarshal forwarded body: %v", err)
+	}
+	if forwarded["service_tier"] != "flex" {
+		t.Fatalf("expected config service_tier=flex to override client value, got %v", forwarded["service_tier"])
+	}
+}
+
 // --- OpenRouter provider tests ---
 
 func TestChatCompletionsOpenRouterForwardsRequestWithBearerKey(t *testing.T) {
