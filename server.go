@@ -35,7 +35,7 @@ func NewServer(cfg *Config, logger *RequestLogger) http.Handler {
 	registerEmbeddingsRoute(mux, cfg, logger)
 
 	// Pass-through routes
-	registerPassthroughRoutes(mux, cfg)
+	registerPassthroughRoutes(mux, cfg, logger)
 
 	return applyMiddleware(mux, cfg, logger)
 }
