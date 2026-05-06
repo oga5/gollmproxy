@@ -104,9 +104,12 @@ func handleGeminiPassthrough(cfg *Config, logger *RequestLogger) http.HandlerFun
 			model = strings.SplitN(m[1], ":", 2)[0]
 		}
 
+		// Strip metadata before forwarding; keep original body for request log.
+		metadata, upstreamBody := extractAndStripMetadata(bodyBytes)
+
 		slog.Info("passthrough", "provider", "gemini", "path", cleanPath)
 
-		upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, u.String(), bytes.NewReader(bodyBytes))
+		upstreamReq, err := http.NewRequestWithContext(r.Context(), r.Method, u.String(), bytes.NewReader(upstreamBody))
 		if err != nil {
 			writeErrorJSON(w, http.StatusInternalServerError, "failed to create upstream request", "server_error")
 			return
@@ -140,7 +143,7 @@ func handleGeminiPassthrough(cfg *Config, logger *RequestLogger) http.HandlerFun
 			flusher, ok := w.(http.Flusher)
 			if !ok {
 				io.Copy(w, resp.Body)
-				logGeminiPassthrough(logger, cfg, reqID, r, model, true, resp.StatusCode, start, bodyBytes, nil, nil)
+				logGeminiPassthrough(logger, cfg, reqID, r, model, true, resp.StatusCode, start, bodyBytes, nil, nil, metadata)
 				return
 			}
 
@@ -164,7 +167,7 @@ func handleGeminiPassthrough(cfg *Config, logger *RequestLogger) http.HandlerFun
 				usage = extractGeminiUsageFromChunks(chunks)
 			}
 			respBody := strings.Join(chunks, "\n")
-			logGeminiPassthrough(logger, cfg, reqID, r, model, true, resp.StatusCode, start, bodyBytes, []byte(respBody), usage)
+			logGeminiPassthrough(logger, cfg, reqID, r, model, true, resp.StatusCode, start, bodyBytes, []byte(respBody), usage, metadata)
 			return
 		}
 
@@ -181,7 +184,7 @@ func handleGeminiPassthrough(cfg *Config, logger *RequestLogger) http.HandlerFun
 		if resp.StatusCode == http.StatusOK {
 			usage = extractGeminiUsageFromBody(respBody)
 		}
-		logGeminiPassthrough(logger, cfg, reqID, r, model, false, resp.StatusCode, start, bodyBytes, respBody, usage)
+		logGeminiPassthrough(logger, cfg, reqID, r, model, false, resp.StatusCode, start, bodyBytes, respBody, usage, metadata)
 	}
 }
 
@@ -207,12 +210,13 @@ func extractGeminiUsageFromChunks(chunks []string) *OpenAIUsage {
 	return nil
 }
 
-func logGeminiPassthrough(logger *RequestLogger, cfg *Config, reqID string, r *http.Request, model string, stream bool, statusCode int, start time.Time, reqBody, respBody []byte, usage *OpenAIUsage) {
+func logGeminiPassthrough(logger *RequestLogger, cfg *Config, reqID string, r *http.Request, model string, stream bool, statusCode int, start time.Time, reqBody, respBody []byte, usage *OpenAIUsage, metadata map[string]any) {
 	entry := LogEntry{
 		Timestamp:  start.UTC().Format(time.RFC3339Nano),
 		RequestID:  reqID,
 		Method:     r.Method,
 		Path:       r.URL.Path,
+		Metadata:   metadata,
 		Provider:   "gemini",
 		Model:      model,
 		Stream:     stream,

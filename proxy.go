@@ -196,6 +196,28 @@ func redactSensitiveURL(rawURL string) string {
 	return parsed.String()
 }
 
+// extractAndStripMetadata removes the top-level "metadata" field from a JSON
+// object body and returns the extracted metadata alongside the stripped body.
+// If no "metadata" key is present, the original body is returned unchanged.
+func extractAndStripMetadata(body []byte) (map[string]any, []byte) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, body
+	}
+	metaRaw, ok := raw["metadata"]
+	if !ok {
+		return nil, body
+	}
+	var metadata map[string]any
+	json.Unmarshal(metaRaw, &metadata)
+	delete(raw, "metadata")
+	stripped, err := json.Marshal(raw)
+	if err != nil {
+		return metadata, body
+	}
+	return metadata, stripped
+}
+
 // writeErrorJSON writes an OpenAI-format error response.
 func writeErrorJSON(w http.ResponseWriter, statusCode int, message, errType string) {
 	w.Header().Set("Content-Type", "application/json")
