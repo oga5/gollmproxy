@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"log/slog"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -20,6 +21,9 @@ type Config struct {
 	MasterKey          string
 	KeyHeaderName      string
 	TrustedProxyHeader string
+	// TrustedProxyCIDRs lists the CIDR ranges of proxies allowed to set
+	// TrustedProxyHeader. Requests from any other peer have the header ignored.
+	TrustedProxyCIDRs []*net.IPNet
 
 	OpenAIAPIKey            string
 	GeminiAPIKey            string
@@ -104,6 +108,7 @@ type generalSettings struct {
 	MasterKey               string                    `yaml:"master_key"`
 	KeyHeaderName           string                    `yaml:"litellm_key_header_name"`
 	TrustedProxyHeader      string                    `yaml:"trusted_proxy_header"`
+	TrustedProxyCIDRs       []string                  `yaml:"trusted_proxy_cidrs"`
 	PostgresDSN             string                    `yaml:"postgres_dsn"`
 	PassThroughEndpoints    []yamlPassThroughEndpoint `yaml:"pass_through_endpoints"`
 }
@@ -251,6 +256,28 @@ func loadYAMLConfig(path string, cfg *Config) {
 	}
 	if lc.GeneralSettings.TrustedProxyHeader != "" {
 		cfg.TrustedProxyHeader = lc.GeneralSettings.TrustedProxyHeader
+	}
+	for _, c := range lc.GeneralSettings.TrustedProxyCIDRs {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		// Allow bare IPs by treating them as /32 or /128.
+		if !strings.Contains(c, "/") {
+			if ip := net.ParseIP(c); ip != nil {
+				if ip.To4() != nil {
+					c += "/32"
+				} else {
+					c += "/128"
+				}
+			}
+		}
+		_, ipnet, err := net.ParseCIDR(c)
+		if err != nil {
+			slog.Warn("invalid trusted_proxy_cidrs entry, skipping", "value", c, "error", err)
+			continue
+		}
+		cfg.TrustedProxyCIDRs = append(cfg.TrustedProxyCIDRs, ipnet)
 	}
 	if lc.GeneralSettings.LogRequestBody != nil {
 		cfg.LogRequestBody = *lc.GeneralSettings.LogRequestBody
