@@ -80,6 +80,8 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 			handleOpenRouterProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
 		case "bedrock":
 			handleBedrockProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
+		case "bedrock_openai":
+			handleBedrockOpenAIProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
 		default:
 			writeErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("unsupported provider: %s", provider), "invalid_request_error")
 		}
@@ -118,6 +120,12 @@ func forwardOpenAICompatChat(w http.ResponseWriter, r *http.Request, cfg *Config
 	}
 	defer resp.Body.Close()
 
+	handleOpenAICompatResponse(w, r, cfg, logger, req, provider, model, resp, bodyBytes, reqID, start)
+}
+
+// handleOpenAICompatResponse handles an upstream OpenAI-compatible response,
+// streaming or non-streaming, and writes a log entry.
+func handleOpenAICompatResponse(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, provider, model string, resp *http.Response, bodyBytes []byte, reqID string, start time.Time) {
 	if req.Stream {
 		setSSEHeaders(w)
 		var chunks []string
@@ -136,7 +144,7 @@ func forwardOpenAICompatChat(w http.ResponseWriter, r *http.Request, cfg *Config
 
 	respBody, err := readUpstreamBody(resp.Body, maxResponseSize)
 	if err != nil {
-		slog.Warn("failed to read "+providerLabel+" upstream response", "request_id", reqID, "error", err)
+		slog.Warn("failed to read "+provider+" upstream response", "request_id", reqID, "error", err)
 		writeErrorJSON(w, http.StatusBadGateway, "failed to read upstream response", "server_error")
 		return
 	}
@@ -147,7 +155,7 @@ func forwardOpenAICompatChat(w http.ResponseWriter, r *http.Request, cfg *Config
 	}
 	w.WriteHeader(resp.StatusCode)
 	if err := writeResponseBody(w, respBody); err != nil {
-		logResponseWriteError("failed to write "+providerLabel+" response", reqID, err)
+		logResponseWriteError("failed to write "+provider+" response", reqID, err)
 		return
 	}
 
