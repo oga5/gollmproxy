@@ -350,7 +350,7 @@ func loadYAMLConfig(path string, cfg *Config) {
 			if apiBase != "" {
 				cfg.OpenRouterBaseURL = apiBase
 			}
-		case strings.HasPrefix(model, "bedrock/"):
+		case strings.HasPrefix(model, "bedrock/"), strings.HasPrefix(model, "bedrock_openai/"):
 			if cfg.BedrockRegion == "" && region != "" {
 				cfg.BedrockRegion = region
 			}
