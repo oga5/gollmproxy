@@ -110,7 +110,7 @@ func authMiddleware(next http.Handler, cfg *Config) http.Handler {
 			return
 		}
 
-		clientIP := getClientIP(r, cfg.TrustedProxyHeader)
+		clientIP := getClientIP(r, cfg)
 
 		// Check lockout before doing any work
 		mu.Lock()
@@ -227,17 +227,39 @@ func getRequestID(r *http.Request) string {
 	return id
 }
 
-// getClientIP extracts the client IP, optionally using a trusted proxy header.
-func getClientIP(r *http.Request, trustedHeader string) string {
-	if trustedHeader != "" {
-		if v := r.Header.Get(trustedHeader); v != "" {
-			// Take the first IP (leftmost = original client)
-			if ip, _, ok := strings.Cut(v, ","); ok {
-				return strings.TrimSpace(ip)
-			}
-			return strings.TrimSpace(v)
+// getClientIP extracts the client IP. It only honors the configured
+// trusted-proxy header when the immediate peer (r.RemoteAddr) is within one
+// of the configured trusted proxy CIDR ranges; otherwise the peer IP is used.
+// This prevents arbitrary clients from spoofing X-Forwarded-For (or similar)
+// to bypass the auth lockout or impersonate other IPs.
+func getClientIP(r *http.Request, cfg *Config) string {
+	peerIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+
+	if cfg.TrustedProxyHeader == "" || len(cfg.TrustedProxyCIDRs) == 0 {
+		return peerIP
+	}
+	parsed := net.ParseIP(peerIP)
+	if parsed == nil {
+		return peerIP
+	}
+	trusted := false
+	for _, n := range cfg.TrustedProxyCIDRs {
+		if n.Contains(parsed) {
+			trusted = true
+			break
 		}
 	}
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return ip
+	if !trusted {
+		return peerIP
+	}
+
+	v := r.Header.Get(cfg.TrustedProxyHeader)
+	if v == "" {
+		return peerIP
+	}
+	// Take the first IP (leftmost = original client)
+	if ip, _, ok := strings.Cut(v, ","); ok {
+		return strings.TrimSpace(ip)
+	}
+	return strings.TrimSpace(v)
 }

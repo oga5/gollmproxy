@@ -30,7 +30,7 @@ func registerPassthroughRoutes(mux *http.ServeMux, cfg *Config, logger *RequestL
 		if !strings.HasSuffix(routePath, "/") {
 			routePath += "/"
 		}
-		mux.HandleFunc(routePath, handleConfiguredPassthrough(ep))
+		mux.HandleFunc(routePath, handleConfiguredPassthrough(cfg, ep))
 		slog.Info("registered pass-through endpoint", "path", routePath, "target", ep.Target)
 	}
 }
@@ -294,7 +294,38 @@ func handleTavilyPassthrough(cfg *Config) http.HandlerFunc {
 	}
 }
 
-func handleConfiguredPassthrough(ep PassThroughEndpoint) http.HandlerFunc {
+// sensitiveForwardHeaders are never forwarded upstream even when
+// ForwardHeaders is enabled, to prevent client credentials and hop-by-hop
+// metadata from leaking. Compared case-insensitively against canonical names.
+var sensitiveForwardHeaders = map[string]struct{}{
+	"Authorization":       {},
+	"Proxy-Authorization": {},
+	"Cookie":              {},
+	"Set-Cookie":          {},
+	// Hop-by-hop
+	"Connection":        {},
+	"Keep-Alive":        {},
+	"Proxy-Connection":  {},
+	"Te":                {},
+	"Trailer":           {},
+	"Transfer-Encoding": {},
+	"Upgrade":           {},
+}
+
+func isSensitiveForwardHeader(name string, extra ...string) bool {
+	canon := http.CanonicalHeaderKey(name)
+	if _, ok := sensitiveForwardHeaders[canon]; ok {
+		return true
+	}
+	for _, e := range extra {
+		if e != "" && http.CanonicalHeaderKey(e) == canon {
+			return true
+		}
+	}
+	return false
+}
+
+func handleConfiguredPassthrough(cfg *Config, ep PassThroughEndpoint) http.HandlerFunc {
 	prefix := ep.Path
 	if !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
@@ -314,9 +345,14 @@ func handleConfiguredPassthrough(ep PassThroughEndpoint) http.HandlerFunc {
 		slog.Info("passthrough", "endpoint", ep.Path, "path", cleanPath)
 
 		_, err = forwardRequest(w, r, u.String(), func(req *http.Request) {
-			// Forward all incoming headers if enabled
+			// Forward all incoming headers if enabled, but always strip
+			// authentication and hop-by-hop headers so the proxy's master
+			// key (or other client credentials) does not leak upstream.
 			if ep.ForwardHeaders {
 				for k, vs := range r.Header {
+					if isSensitiveForwardHeader(k, cfg.KeyHeaderName, cfg.TrustedProxyHeader) {
+						continue
+					}
 					for _, v := range vs {
 						req.Header.Add(k, v)
 					}
