@@ -120,20 +120,17 @@ func forwardOpenAICompatChat(w http.ResponseWriter, r *http.Request, cfg *Config
 
 	if req.Stream {
 		setSSEHeaders(w)
+		var chunks []string
 		var onChunk onChunkFunc
 		if cfg.LogResponseBody {
-			onChunk = func(index int, data []byte) {
-				logger.LogChunk(ChunkLogEntry{
-					RequestID:  reqID,
-					ChunkIndex: index,
-					Data:       string(data),
-				})
+			onChunk = func(_ int, data []byte) {
+				chunks = append(chunks, string(data))
 			}
 		}
 		if err := proxySSEStream(w, resp.Body, nil, onChunk); err != nil {
 			slog.Error("streaming error", "error", err)
 		}
-		logRequest(logger, cfg, reqID, r, provider, model, true, resp.StatusCode, start, string(bodyBytes), "", req.User, req.Metadata, nil)
+		logRequest(logger, cfg, reqID, r, provider, model, true, resp.StatusCode, start, string(bodyBytes), strings.Join(chunks, "\n"), req.User, req.Metadata, nil)
 		return
 	}
 
@@ -381,14 +378,11 @@ func handleGeminiStream(w http.ResponseWriter, resp *http.Response, cfg *Config,
 	}
 
 	setSSEHeaders(w)
+	var chunks []string
 	var onChunk onChunkFunc
 	if cfg.LogResponseBody {
-		onChunk = func(index int, data []byte) {
-			logger.LogChunk(ChunkLogEntry{
-				RequestID:  reqID,
-				ChunkIndex: index,
-				Data:       string(data),
-			})
+		onChunk = func(_ int, data []byte) {
+			chunks = append(chunks, string(data))
 		}
 	}
 	if err := proxySSEStream(w, resp.Body, transformLine, onChunk); err != nil {
@@ -401,7 +395,7 @@ func handleGeminiStream(w http.ResponseWriter, resp *http.Response, cfg *Config,
 		flusher.Flush()
 	}
 
-	logRequest(logger, cfg, reqID, r, "gemini", model, true, http.StatusOK, start, string(bodyBytes), "", user, metadata, nil)
+	logRequest(logger, cfg, reqID, r, "gemini", model, true, http.StatusOK, start, string(bodyBytes), strings.Join(chunks, "\n"), user, metadata, nil)
 }
 
 func logRequest(logger *RequestLogger, cfg *Config, reqID string, r *http.Request, provider, model string, stream bool, statusCode int, start time.Time, reqBody, respBody string, user string, metadata map[string]any, usage *OpenAIUsage) {

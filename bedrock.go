@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -134,9 +135,9 @@ func handleBedrockStream(w http.ResponseWriter, r *http.Request, cfg *Config, lo
 		filter = NewReasoningStripper()
 	}
 
-	chunkIndex := 0
 	var usage *OpenAIUsage
 	var usageChunk []byte
+	var chunks []string
 	for event := range resp.GetStream().Events() {
 		switch v := event.(type) {
 		case *brtypes.ResponseStreamMemberChunk:
@@ -151,13 +152,8 @@ func handleBedrockStream(w http.ResponseWriter, r *http.Request, cfg *Config, lo
 			fmt.Fprintf(w, "data: %s\n\n", result.Body)
 			flusher.Flush()
 			if cfg.LogResponseBody {
-				logger.LogChunk(ChunkLogEntry{
-					RequestID:  reqID,
-					ChunkIndex: chunkIndex,
-					Data:       string(result.Body),
-				})
+				chunks = append(chunks, string(result.Body))
 			}
-			chunkIndex++
 		default:
 			slog.Warn("unexpected bedrock stream event", "request_id", reqID, "event_type", fmt.Sprintf("%T", v))
 		}
@@ -178,18 +174,15 @@ func handleBedrockStream(w http.ResponseWriter, r *http.Request, cfg *Config, lo
 		fmt.Fprintf(w, "data: %s\n\n", usageChunk)
 		flusher.Flush()
 		if cfg.LogResponseBody {
-			logger.LogChunk(ChunkLogEntry{
-				RequestID:  reqID,
-				ChunkIndex: chunkIndex,
-				Data:       string(usageChunk),
-			})
+			chunks = append(chunks, string(usageChunk))
 		}
-		chunkIndex++
 	}
 
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()
-	logRequest(logger, cfg, reqID, r, "bedrock", model, true, http.StatusOK, start, string(modifiedBody), "", req.User, req.Metadata, usage)
+
+	respBody := strings.Join(chunks, "\n")
+	logRequest(logger, cfg, reqID, r, "bedrock", model, true, http.StatusOK, start, string(modifiedBody), respBody, req.User, req.Metadata, usage)
 }
 
 func stringPtr(s string) *string {
