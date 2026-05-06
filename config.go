@@ -44,6 +44,10 @@ type Config struct {
 	// EmbeddingModels is the set of provider-prefixed models that have mode: embedding in model_info.
 	EmbeddingModels map[string]bool
 
+	// PostgresDSN is the optional DSN for PostgreSQL request logging.
+	// When set, log entries are written to llm_logs / llm_payloads tables in addition to the log file.
+	PostgresDSN string
+
 	// PassThroughEndpoints holds custom pass-through proxy endpoints from config.
 	PassThroughEndpoints []PassThroughEndpoint
 }
@@ -100,6 +104,7 @@ type generalSettings struct {
 	MasterKey               string                    `yaml:"master_key"`
 	KeyHeaderName           string                    `yaml:"litellm_key_header_name"`
 	TrustedProxyHeader      string                    `yaml:"trusted_proxy_header"`
+	PostgresDSN             string                    `yaml:"postgres_dsn"`
 	PassThroughEndpoints    []yamlPassThroughEndpoint `yaml:"pass_through_endpoints"`
 }
 
@@ -167,6 +172,9 @@ func LoadConfig() *Config {
 	}
 	if v := os.Getenv("LOG_FILE"); v != "" {
 		cfg.LogFile = v
+	}
+	if v := os.Getenv("POSTGRES_DSN"); v != "" {
+		cfg.PostgresDSN = v
 	}
 
 	if v := os.Getenv("OPENAI_API_KEY"); v != "" {
@@ -247,6 +255,9 @@ func loadYAMLConfig(path string, cfg *Config) {
 	}
 	if lc.GeneralSettings.BedrockIncludeReasoning != nil {
 		cfg.BedrockIncludeReasoning = *lc.GeneralSettings.BedrockIncludeReasoning
+	}
+	if v := resolveEnvRef(lc.GeneralSettings.PostgresDSN); v != "" {
+		cfg.PostgresDSN = v
 	}
 
 	// Load pass-through endpoints
