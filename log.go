@@ -32,8 +32,9 @@ type LogEntry struct {
 const maxBodyLogSize = 10 * 1024 // 10KB
 
 type RequestLogger struct {
-	file *os.File
-	mu   sync.Mutex
+	file  *os.File
+	mu    sync.Mutex
+	pgLog *PostgresLogger // optional; attached via AttachPostgresLogger
 }
 
 func NewRequestLogger(path string) (*RequestLogger, error) {
@@ -42,6 +43,11 @@ func NewRequestLogger(path string) (*RequestLogger, error) {
 		return nil, err
 	}
 	return &RequestLogger{file: f}, nil
+}
+
+// AttachPostgresLogger adds a PostgreSQL backend that receives every log entry.
+func (l *RequestLogger) AttachPostgresLogger(pg *PostgresLogger) {
+	l.pgLog = pg
 }
 
 func (l *RequestLogger) Log(entry LogEntry) {
@@ -63,9 +69,18 @@ func (l *RequestLogger) Log(entry LogEntry) {
 	if _, err := l.file.Write(data); err != nil {
 		slog.Warn("failed to write request log entry", "error", err)
 	}
+
+	if l.pgLog != nil {
+		l.pgLog.Log(entry)
+	}
 }
 
 func (l *RequestLogger) Close() error {
+	if l.pgLog != nil {
+		if err := l.pgLog.Close(); err != nil {
+			slog.Warn("failed to close postgres logger", "error", err)
+		}
+	}
 	return l.file.Close()
 }
 

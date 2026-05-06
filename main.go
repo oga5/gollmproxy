@@ -18,6 +18,16 @@ func main() {
 	}
 	defer logger.Close()
 
+	if cfg.PostgresDSN != "" {
+		pg, err := NewPostgresLogger(cfg.PostgresDSN)
+		if err != nil {
+			slog.Error("failed to connect to postgres for logging", "error", err)
+			os.Exit(1)
+		}
+		logger.AttachPostgresLogger(pg)
+		slog.Info("postgres request logging enabled")
+	}
+
 	handler := NewServer(cfg, logger)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)

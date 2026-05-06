@@ -44,6 +44,10 @@ type Config struct {
 	// EmbeddingModels is the set of provider-prefixed models that have mode: embedding in model_info.
 	EmbeddingModels map[string]bool
 
+	// PostgresDSN is the optional DSN for PostgreSQL request logging.
+	// When set, log entries are written to llm_logs / llm_payloads tables in addition to the log file.
+	PostgresDSN string
+
 	// PassThroughEndpoints holds custom pass-through proxy endpoints from config.
 	PassThroughEndpoints []PassThroughEndpoint
 }
@@ -100,6 +104,7 @@ type generalSettings struct {
 	MasterKey               string                    `yaml:"master_key"`
 	KeyHeaderName           string                    `yaml:"litellm_key_header_name"`
 	TrustedProxyHeader      string                    `yaml:"trusted_proxy_header"`
+	PostgresDSN             string                    `yaml:"postgres_dsn"`
 	PassThroughEndpoints    []yamlPassThroughEndpoint `yaml:"pass_through_endpoints"`
 }
 
@@ -167,6 +172,14 @@ func LoadConfig() *Config {
 	}
 	if v := os.Getenv("LOG_FILE"); v != "" {
 		cfg.LogFile = v
+	}
+	if v := os.Getenv("POSTGRES_DSN"); v != "" {
+		cfg.PostgresDSN = v
+	} else if cfg.PostgresDSN == "" {
+		// Fall back to standard libpq PG* environment variables.
+		if dsn := buildPostgresDSNFromEnv(); dsn != "" {
+			cfg.PostgresDSN = dsn
+		}
 	}
 
 	if v := os.Getenv("OPENAI_API_KEY"); v != "" {
@@ -247,6 +260,9 @@ func loadYAMLConfig(path string, cfg *Config) {
 	}
 	if lc.GeneralSettings.BedrockIncludeReasoning != nil {
 		cfg.BedrockIncludeReasoning = *lc.GeneralSettings.BedrockIncludeReasoning
+	}
+	if v := resolveEnvRef(lc.GeneralSettings.PostgresDSN); v != "" {
+		cfg.PostgresDSN = v
 	}
 
 	// Load pass-through endpoints
@@ -356,4 +372,40 @@ func loadYAMLConfig(path string, cfg *Config) {
 			}
 		}
 	}
+}
+
+// buildPostgresDSNFromEnv constructs a key=value connection string from the
+// standard libpq PG* environment variables. Returns an empty string if none
+// of the relevant variables are set.
+func buildPostgresDSNFromEnv() string {
+	params := []struct{ key, env string }{
+		{"host", "PGHOST"},
+		{"port", "PGPORT"},
+		{"user", "PGUSER"},
+		{"password", "PGPASSWORD"},
+		{"dbname", "PGDATABASE"},
+		{"sslmode", "PGSSLMODE"},
+	}
+
+	var parts []string
+	for _, p := range params {
+		if v := os.Getenv(p.env); v != "" {
+			parts = append(parts, p.key+"="+pgEscape(v))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " ")
+}
+
+// pgEscape escapes a value for use in a libpq key=value connection string.
+// Values containing spaces, single quotes, or backslashes must be single-quoted.
+func pgEscape(v string) string {
+	if !strings.ContainsAny(v, " '\\") {
+		return v
+	}
+	v = strings.ReplaceAll(v, `\`, `\\`)
+	v = strings.ReplaceAll(v, `'`, `\'`)
+	return "'" + v + "'"
 }
