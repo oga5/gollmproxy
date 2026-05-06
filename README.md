@@ -301,6 +301,113 @@ jq 'select(.chunk_index != null)' gollmproxy.log
 jq 'select(.chunk_index == null)' gollmproxy.log
 ```
 
+### PostgreSQLへのログ出力
+
+JONLファイルに加えて、PostgreSQLへリクエストログを書き込める。モデル・トークン・メタデータは `llm_logs` に、リクエスト/レスポンスボディ全文は `llm_payloads` に格納される。書き込みは非同期（バッファ付きキュー）のため、リクエスト処理のレイテンシに影響しない。
+
+#### テーブル作成
+
+```sql
+CREATE TABLE llm_logs (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at  timestamptz DEFAULT now(),
+  model_name  text        NOT NULL,
+  input_tokens  int,
+  output_tokens int,
+  metadata    jsonb,
+  -- metadata 内の頻出キーを生成列として独立させてインデックスを張りやすくする
+  app_id   text GENERATED ALWAYS AS (metadata->>'app_id')   STORED,
+  dept_cd  text GENERATED ALWAYS AS (metadata->>'dept_cd')  STORED,
+  user_id  text GENERATED ALWAYS AS (metadata->>'user_id')  STORED
+);
+
+-- metadata 全体を GIN インデックスで検索可能にする
+CREATE INDEX idx_llm_logs_metadata ON llm_logs USING gin (metadata);
+
+-- リクエスト/レスポンスボディ全文（デバッグ・監査用）
+CREATE TABLE llm_payloads (
+  log_id      uuid  PRIMARY KEY REFERENCES llm_logs(id) ON DELETE CASCADE,
+  input_body  jsonb,
+  output_body jsonb
+);
+```
+
+`metadata` には `provider`, `path`, `status_code`, `latency_ms`, `user`, `client_ip` 等が自動的に格納される。リクエスト時に指定した `metadata` オブジェクトのキー（`app_id`, `dept_cd`, `user_id` 等）も同じカラムにマージされる。
+
+#### 接続設定
+
+**方法1: 接続文字列 (POSTGRES_DSN)**
+
+環境変数または YAML で指定する。
+
+```bash
+export POSTGRES_DSN="postgres://proxy_admin:password@db.example.com:5432/llm_gateway_logs?sslmode=require"
+```
+
+```yaml
+general_settings:
+  postgres_dsn: os.environ/POSTGRES_DSN
+```
+
+**方法2: 個別の PG* 環境変数**
+
+`POSTGRES_DSN` が未設定の場合、標準の libpq 環境変数を自動的に使用する。
+
+| 環境変数 | 説明 | 例 |
+|---------|------|---|
+| `PGHOST` | ホスト名 | `db.example.com` |
+| `PGPORT` | ポート番号 | `5432` |
+| `PGUSER` | ユーザー名 | `proxy_admin` |
+| `PGPASSWORD` | パスワード | `(secret)` |
+| `PGDATABASE` | データベース名 | `llm_gateway_logs` |
+| `PGSSLMODE` | SSLモード | `require` |
+
+```bash
+export PGHOST=db.example.com
+export PGPORT=5432
+export PGUSER=proxy_admin
+export PGPASSWORD=secret_password
+export PGDATABASE=llm_gateway_logs
+export PGSSLMODE=require
+./gollmproxy -config config.yaml
+```
+
+どちらの方法も未設定の場合、PostgreSQL へのログ出力は行われず JSONL ファイルのみに書き込まれる。
+
+#### クエリ例
+
+```sql
+-- 直近1時間のリクエスト数とトークン使用量をモデル別に集計
+SELECT
+  model_name,
+  count(*)              AS requests,
+  sum(input_tokens)     AS total_input_tokens,
+  sum(output_tokens)    AS total_output_tokens
+FROM llm_logs
+WHERE created_at > now() - interval '1 hour'
+GROUP BY model_name
+ORDER BY requests DESC;
+
+-- app_id ごとのコスト試算用集計
+SELECT
+  app_id,
+  count(*)          AS requests,
+  sum(input_tokens) AS input_tokens,
+  sum(output_tokens) AS output_tokens
+FROM llm_logs
+WHERE app_id IS NOT NULL
+GROUP BY app_id;
+
+-- エラーになったリクエストのボディを確認
+SELECT l.id, l.model_name, l.created_at,
+       p.input_body, p.output_body
+FROM llm_logs l
+JOIN llm_payloads p ON p.log_id = l.id
+WHERE (l.metadata->>'status_code')::int >= 400
+ORDER BY l.created_at DESC
+LIMIT 20;
+```
+
 ## ライセンス
 
 [MIT](LICENSE)
