@@ -61,6 +61,9 @@ general_settings:
   log_request_body: true
   log_response_body: true
   bedrock_include_reasoning: false
+  # required_metadata_keys:
+  #   - app_id
+  #   - user_id
   # pass_through_endpoints:
   #   - path: /custom-api
   #     target: https://api.example.com

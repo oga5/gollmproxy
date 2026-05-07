@@ -44,6 +44,15 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 			return
 		}
 
+		// Validate required metadata keys
+		for _, key := range cfg.RequiredMetadataKeys {
+			v, ok := req.Metadata[key]
+			if !ok || v == nil || v == "" {
+				writeErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("missing required metadata field: %s", key), "invalid_request_error")
+				return
+			}
+		}
+
 		// Resolve model alias (model_name -> provider-prefixed model)
 		requestedModel := req.Model
 		modelField := requestedModel

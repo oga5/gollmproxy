@@ -54,6 +54,10 @@ type Config struct {
 
 	// PassThroughEndpoints holds custom pass-through proxy endpoints from config.
 	PassThroughEndpoints []PassThroughEndpoint
+
+	// RequiredMetadataKeys lists metadata keys that must be present and non-empty
+	// in every /v1/chat/completions request. Missing keys result in a 400 error.
+	RequiredMetadataKeys []string
 }
 
 // ModelConfig holds per-model configuration overrides.
@@ -112,6 +116,7 @@ type generalSettings struct {
 	TrustedProxyCIDRs       []string                  `yaml:"trusted_proxy_cidrs"`
 	PostgresDSN             string                    `yaml:"postgres_dsn"`
 	PassThroughEndpoints    []yamlPassThroughEndpoint `yaml:"pass_through_endpoints"`
+	RequiredMetadataKeys    []string                  `yaml:"required_metadata_keys"`
 }
 
 type yamlPassThroughEndpoint struct {
@@ -291,6 +296,9 @@ func loadYAMLConfig(path string, cfg *Config) {
 	}
 	if v := resolveEnvRef(lc.GeneralSettings.PostgresDSN); v != "" {
 		cfg.PostgresDSN = v
+	}
+	if len(lc.GeneralSettings.RequiredMetadataKeys) > 0 {
+		cfg.RequiredMetadataKeys = lc.GeneralSettings.RequiredMetadataKeys
 	}
 
 	// Load pass-through endpoints
