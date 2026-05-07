@@ -92,11 +92,12 @@ type modelInfo struct {
 }
 
 type modelParams struct {
-	Model       string                 `yaml:"model"`
-	APIKey      string                 `yaml:"api_key"`
-	APIBase     string                 `yaml:"api_base"`
-	Region      string                 `yaml:"region"`
-	ExtraParams map[string]interface{} `yaml:"extra_params"`
+	Model         string                 `yaml:"model"`
+	APIKey        string                 `yaml:"api_key"`
+	APIBase       string                 `yaml:"api_base"`
+	Region        string                 `yaml:"region"`
+	AwsRegionName string                 `yaml:"aws_region_name"`
+	ExtraParams   map[string]interface{} `yaml:"extra_params"`
 }
 
 type generalSettings struct {
@@ -342,6 +343,9 @@ func loadYAMLConfig(path string, cfg *Config) {
 		apiKey := resolveEnvRef(entry.Params.APIKey)
 		apiBase := entry.Params.APIBase
 		region := resolveEnvRef(entry.Params.Region)
+		if v := resolveEnvRef(entry.Params.AwsRegionName); v != "" {
+			region = v
+		}
 
 		// Register model_name -> provider-prefixed model alias
 		if entry.ModelName != "" && model != "" {
