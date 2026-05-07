@@ -104,6 +104,9 @@ general_settings:
   litellm_key_header_name: X-Litellm-Api-Key
   port: 8080
   log_file: "gollmproxy.log"
+  required_metadata_keys:
+    - app_id
+    - user_id
 
 model_list:
   - model_name: gpt-4o
@@ -139,6 +142,7 @@ environment_variables:
   - `master_key`: プロキシへのアクセスを制限するAPIキー（`os.environ/` 構文対応）
   - `litellm_key_header_name`: 認証ヘッダ名（未設定時は `Authorization`）
   - `bedrock_include_reasoning`: Bedrock 応答中の `<reasoning>...</reasoning>` を返すか（デフォルト: false）
+  - `required_metadata_keys`: `/v1/chat/completions` リクエストの `metadata` フィールドで必須とするキーのリスト。指定したキーが存在しないまたは空の場合は HTTP 400 を返す
 - `model_list`: `litellm_params.model` のプレフィックス (`openai/`, `gemini/`, `ollama_chat/`, `bedrock/`) でプロバイダ判定。`api_base` はモデル毎に設定可能。Bedrock は `region` を利用
 - `search_tools`: 検索ツール設定（Tavily等）。`search_provider` でプロバイダ判定
 - `google_ai_studio_passthrough`: Geminiパススルー用APIキー設定
