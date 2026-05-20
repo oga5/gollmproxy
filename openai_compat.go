@@ -19,8 +19,9 @@ import (
 var validModelName = regexp.MustCompile(`^[a-zA-Z0-9._:/-]+$`)
 
 const (
-	maxRequestSize  = 10 << 20 // 10MB
-	maxResponseSize = 64 << 20 // 64MB
+	maxRequestSize           = 10 << 20 // 10MB
+	maxResponseSize          = 64 << 20 // 64MB
+	tokenBudgetUpdateTimeout = 2 * time.Second
 )
 
 func registerOpenAICompatRoutes(mux *http.ServeMux, cfg *Config, logger *RequestLogger) {
@@ -445,7 +446,7 @@ func handleGeminiStream(w http.ResponseWriter, resp *http.Response, cfg *Config,
 func logRequest(logger *RequestLogger, cfg *Config, reqID string, r *http.Request, provider, model string, stream bool, statusCode int, start time.Time, reqBody, respBody string, user string, metadata map[string]any, usage *OpenAIUsage) {
 	if cfg.TokenBudgetEnabled && cfg.TokenBudgetStore != nil && usage != nil && usage.TotalTokens > 0 && statusCode >= 200 && statusCode < 300 {
 		if appID, modelID, err := extractBudgetIdentifiers(metadata); err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(r.Context(), tokenBudgetUpdateTimeout)
 			defer cancel()
 			if err := cfg.TokenBudgetStore.AddUsage(ctx, appID, modelID, usage.TotalTokens, start); err != nil {
 				slog.Warn("failed to update token usage", "request_id", reqID, "error", err)

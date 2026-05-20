@@ -14,7 +14,7 @@ type fakeTokenBudgetStore struct {
 	checkCalls int
 	addCalls   int
 
-	lastCheckAppID  string
+	lastCheckAppID   string
 	lastCheckModelID string
 
 	lastAddAppID   string
@@ -130,4 +130,3 @@ func TestChatCompletionsTokenBudgetAddsUsageAfterInvoke(t *testing.T) {
 		t.Fatalf("unexpected added tokens: %d", store.lastAddTokens)
 	}
 }
-

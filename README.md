@@ -242,7 +242,10 @@ environment_variables:
 - `token_budgets` テーブルに予算設定が無い場合は 429
 - 当日の累計が予算以上の場合は 429
 
+#### 重要: ソフトリミット
+
 予算はソフトリミットで、invoke 後に `usage.total_tokens` を `token_usage_daily` へ upsert 加算するため、1リクエストで予算超過することは許容される。
+また、同一 `appid/modelid` への同時リクエストが複数ある場合、事前チェックが同時に通過して超過量が大きくなる可能性がある。
 
 ```sql
 CREATE TABLE token_budgets (

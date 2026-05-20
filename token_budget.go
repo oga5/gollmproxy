@@ -15,7 +15,10 @@ var (
 	ErrBudgetIdentifiersRequired = errors.New("appid and modelid are required")
 	ErrBudgetNotConfigured       = errors.New("token budget not configured")
 	ErrBudgetExceeded            = errors.New("token budget exceeded")
+	ErrInvalidTokenUsage         = errors.New("token usage must be non-negative")
 )
+
+const dailyUsageDateFormat = "2006-01-02"
 
 type TokenBudgetStore interface {
 	CheckAllowed(ctx context.Context, appID, modelID string, day time.Time) error
@@ -49,6 +52,8 @@ func (s *PostgresTokenBudgetStore) Close() error {
 }
 
 func (s *PostgresTokenBudgetStore) ensureSchema() error {
+	// Schema is created opportunistically on startup. If schema changes are needed
+	// later, apply explicit migrations (ALTER TABLE etc.) before deployment.
 	const createBudgetsTable = `
 CREATE TABLE IF NOT EXISTS token_budgets (
   appid text NOT NULL,
@@ -92,7 +97,7 @@ LEFT JOIN token_usage_daily u
 WHERE b.appid = $1
   AND b.modelid = $2`
 
-	usageDate := day.UTC().Format("2006-01-02")
+	usageDate := day.UTC().Format(dailyUsageDateFormat)
 	var budget, used int64
 	err := s.db.QueryRowContext(ctx, q, appID, modelID, usageDate).Scan(&budget, &used)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -108,13 +113,16 @@ WHERE b.appid = $1
 }
 
 func (s *PostgresTokenBudgetStore) AddUsage(ctx context.Context, appID, modelID string, tokens int, day time.Time) error {
-	if tokens <= 0 {
-		return nil
-	}
 	appID = strings.TrimSpace(appID)
 	modelID = strings.TrimSpace(modelID)
 	if appID == "" || modelID == "" {
 		return ErrBudgetIdentifiersRequired
+	}
+	if tokens == 0 {
+		return nil
+	}
+	if tokens < 0 {
+		return ErrInvalidTokenUsage
 	}
 
 	const q = `
@@ -123,7 +131,7 @@ VALUES ($1, $2, $3, $4)
 ON CONFLICT (usage_date, appid, modelid)
 DO UPDATE SET token = token_usage_daily.token + EXCLUDED.token`
 
-	usageDate := day.UTC().Format("2006-01-02")
+	usageDate := day.UTC().Format(dailyUsageDateFormat)
 	if _, err := s.db.ExecContext(ctx, q, usageDate, appID, modelID, tokens); err != nil {
 		return err
 	}
