@@ -1,6 +1,7 @@
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   litellm_key_header_name: X-Litellm-Api-Key
+  token_budget_enabled: false
   bedrock_include_reasoning: false
 
 model_list:
@@ -34,4 +35,3 @@ search_tools:
 # Google AI Studio passthrough (for Google Grounding)
 google_ai_studio_passthrough:
   api_key: os.environ/GEMINI_API_KEY
-

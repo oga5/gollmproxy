@@ -60,6 +60,7 @@ general_settings:
   log_file: "gollmproxy.log"
   log_request_body: true
   log_response_body: true
+  token_budget_enabled: false
   bedrock_include_reasoning: false
   # required_metadata_keys:
   #   - app_id

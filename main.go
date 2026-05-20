@@ -28,6 +28,21 @@ func main() {
 		slog.Info("postgres request logging enabled")
 	}
 
+	if cfg.TokenBudgetEnabled {
+		if cfg.PostgresDSN == "" {
+			slog.Error("token budget enabled but postgres_dsn is not configured")
+			os.Exit(1)
+		}
+		tokenBudgetStore, err := NewPostgresTokenBudgetStore(cfg.PostgresDSN)
+		if err != nil {
+			slog.Error("failed to connect to postgres for token budget", "error", err)
+			os.Exit(1)
+		}
+		defer tokenBudgetStore.Close()
+		cfg.TokenBudgetStore = tokenBudgetStore
+		slog.Info("token budget control enabled")
+	}
+
 	handler := NewServer(cfg, logger)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)

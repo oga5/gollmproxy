@@ -52,6 +52,13 @@ type Config struct {
 	// When set, log entries are written to llm_logs / llm_payloads tables in addition to the log file.
 	PostgresDSN string
 
+	// TokenBudgetEnabled enables appid/modelid daily token budget checks.
+	TokenBudgetEnabled bool
+
+	// TokenBudgetStore manages token budget checks and usage updates.
+	// It is initialized at runtime when TokenBudgetEnabled is true.
+	TokenBudgetStore TokenBudgetStore
+
 	// PassThroughEndpoints holds custom pass-through proxy endpoints from config.
 	PassThroughEndpoints []PassThroughEndpoint
 
@@ -115,6 +122,7 @@ type generalSettings struct {
 	TrustedProxyHeader      string                    `yaml:"trusted_proxy_header"`
 	TrustedProxyCIDRs       []string                  `yaml:"trusted_proxy_cidrs"`
 	PostgresDSN             string                    `yaml:"postgres_dsn"`
+	TokenBudgetEnabled      *bool                     `yaml:"token_budget_enabled"`
 	PassThroughEndpoints    []yamlPassThroughEndpoint `yaml:"pass_through_endpoints"`
 	RequiredMetadataKeys    []string                  `yaml:"required_metadata_keys"`
 }
@@ -190,6 +198,11 @@ func LoadConfig() *Config {
 		// Fall back to standard libpq PG* environment variables.
 		if dsn := buildPostgresDSNFromEnv(); dsn != "" {
 			cfg.PostgresDSN = dsn
+		}
+	}
+	if v := os.Getenv("TOKEN_BUDGET_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.TokenBudgetEnabled = enabled
 		}
 	}
 
@@ -296,6 +309,9 @@ func loadYAMLConfig(path string, cfg *Config) {
 	}
 	if v := resolveEnvRef(lc.GeneralSettings.PostgresDSN); v != "" {
 		cfg.PostgresDSN = v
+	}
+	if lc.GeneralSettings.TokenBudgetEnabled != nil {
+		cfg.TokenBudgetEnabled = *lc.GeneralSettings.TokenBudgetEnabled
 	}
 	if len(lc.GeneralSettings.RequiredMetadataKeys) > 0 {
 		cfg.RequiredMetadataKeys = lc.GeneralSettings.RequiredMetadataKeys
