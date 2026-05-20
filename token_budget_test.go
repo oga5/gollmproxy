@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-type fakeTokenBudgetStore struct {
+type mockTokenBudgetStore struct {
 	checkErr error
 	addErr   error
 
@@ -22,14 +22,14 @@ type fakeTokenBudgetStore struct {
 	lastAddTokens  int
 }
 
-func (f *fakeTokenBudgetStore) CheckAllowed(_ context.Context, appID, modelID string, _ time.Time) error {
+func (f *mockTokenBudgetStore) CheckAllowed(_ context.Context, appID, modelID string, _ time.Time) error {
 	f.checkCalls++
 	f.lastCheckAppID = appID
 	f.lastCheckModelID = modelID
 	return f.checkErr
 }
 
-func (f *fakeTokenBudgetStore) AddUsage(_ context.Context, appID, modelID string, tokens int, _ time.Time) error {
+func (f *mockTokenBudgetStore) AddUsage(_ context.Context, appID, modelID string, tokens int, _ time.Time) error {
 	f.addCalls++
 	f.lastAddAppID = appID
 	f.lastAddModelID = modelID
@@ -39,7 +39,7 @@ func (f *fakeTokenBudgetStore) AddUsage(_ context.Context, appID, modelID string
 
 func TestChatCompletionsTokenBudgetMissingIdentifiersReturns429(t *testing.T) {
 	upstream, _ := newCaptureUpstream(t, http.StatusOK, "application/json", `{"id":"x","object":"chat.completion","created":1,"model":"gpt-4o","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
-	store := &fakeTokenBudgetStore{}
+	store := &mockTokenBudgetStore{}
 
 	cfg := &Config{
 		TokenBudgetEnabled: true,
@@ -67,7 +67,7 @@ func TestChatCompletionsTokenBudgetMissingIdentifiersReturns429(t *testing.T) {
 
 func TestChatCompletionsTokenBudgetNotConfiguredReturns429(t *testing.T) {
 	upstream, _ := newCaptureUpstream(t, http.StatusOK, "application/json", `{"id":"x","object":"chat.completion","created":1,"model":"gpt-4o","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
-	store := &fakeTokenBudgetStore{checkErr: ErrBudgetNotConfigured}
+	store := &mockTokenBudgetStore{checkErr: ErrBudgetNotConfigured}
 
 	cfg := &Config{
 		TokenBudgetEnabled: true,
@@ -96,7 +96,7 @@ func TestChatCompletionsTokenBudgetNotConfiguredReturns429(t *testing.T) {
 func TestChatCompletionsTokenBudgetAddsUsageAfterInvoke(t *testing.T) {
 	upstreamResp := `{"id":"x","object":"chat.completion","created":1,"model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`
 	upstream, _ := newCaptureUpstream(t, http.StatusOK, "application/json", upstreamResp)
-	store := &fakeTokenBudgetStore{}
+	store := &mockTokenBudgetStore{}
 
 	cfg := &Config{
 		TokenBudgetEnabled: true,

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/lib/pq"
+	_ "github.com/lib/pq" // registers postgres driver
 )
 
 var (
@@ -118,11 +118,11 @@ func (s *PostgresTokenBudgetStore) AddUsage(ctx context.Context, appID, modelID 
 	if appID == "" || modelID == "" {
 		return ErrBudgetIdentifiersRequired
 	}
-	if tokens == 0 {
-		return nil
-	}
 	if tokens < 0 {
 		return ErrInvalidTokenUsage
+	}
+	if tokens == 0 {
+		return nil
 	}
 
 	const q = `

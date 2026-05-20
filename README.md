@@ -246,6 +246,7 @@ environment_variables:
 
 予算はソフトリミットで、invoke 後に `usage.total_tokens` を `token_usage_daily` へ upsert 加算するため、1リクエストで予算超過することは許容される。
 また、同一 `appid/modelid` への同時リクエストが複数ある場合、事前チェックが同時に通過して超過量が大きくなる可能性がある。
+厳密な上限制御が必要な場合は、DBロック（例: advisory lock）や更新時の競合制御を追加する運用を推奨。
 
 ```sql
 CREATE TABLE token_budgets (
