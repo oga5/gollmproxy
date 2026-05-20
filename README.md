@@ -163,6 +163,7 @@ curl http://localhost:8080/health
 | `OPENAI_BASE_URL` | OpenAI APIベースURL | `https://api.openai.com` |
 | `GEMINI_BASE_URL` | Gemini APIベースURL | `https://generativelanguage.googleapis.com` |
 | `TAVILY_BASE_URL` | Tavily APIベースURL | `https://api.tavily.com` |
+| `TOKEN_BUDGET_ENABLED` | appid/modelid 単位のトークン予算管理を有効化 | `false` |
 
 ### 設定ファイル (YAML)
 
@@ -176,6 +177,7 @@ general_settings:
   log_file: "gollmproxy.log"
   log_request_body: true
   log_response_body: true
+  token_budget_enabled: false
   bedrock_include_reasoning: false
   required_metadata_keys:
     - app_id
@@ -221,6 +223,7 @@ environment_variables:
   - `litellm_key_header_name`: 認証ヘッダ名（未設定時は `Authorization`）
   - `log_request_body`: リクエストボディをログに記録するか（デフォルト: `true`）
   - `log_response_body`: レスポンスボディをログに記録するか（デフォルト: `true`）
+  - `token_budget_enabled`: `/v1/chat/completions` の予算管理を有効化するか（デフォルト: `false`）
   - `bedrock_include_reasoning`: Bedrock 応答中の `<reasoning>...</reasoning>` をそのまま返すか。未設定時は `false`
   - `required_metadata_keys`: `/v1/chat/completions` の `metadata` フィールドで必須とするキーのリスト。指定したキーが存在しないまたは空の場合は HTTP 400 を返す
 - `model_list`: `litellm_params.model` のプレフィックス (`openai/`, `gemini/`, `bedrock/`, `bedrock_openai/`) でプロバイダ判定
@@ -230,6 +233,37 @@ environment_variables:
 - `google_ai_studio_passthrough`: Geminiパススルー用APIキー設定
 - `environment_variables`: YAMLからOS環境変数をセット（既存の環境変数が優先）
 - `os.environ/VARNAME`: 環境変数参照構文（`api_key` 等で使用）
+
+### トークン予算管理（appid/modelid 単位）
+
+`general_settings.token_budget_enabled: true`（または `TOKEN_BUDGET_ENABLED=true`）時、`/v1/chat/completions` で invoke 前に日次予算チェックを行う。
+
+- `metadata.appid` / `metadata.modelid` が未指定または空の場合は 429
+- `token_budgets` テーブルに予算設定が無い場合は 429
+- 当日の累計が予算以上の場合は 429
+
+#### 重要: ソフトリミット
+
+予算はソフトリミットで、invoke 後に `usage.total_tokens` を `token_usage_daily` へ upsert 加算するため、1リクエストで予算超過することは許容される。
+また、同一 `appid/modelid` への同時リクエストが複数ある場合、事前チェックが同時に通過して超過量が大きくなる可能性がある。
+厳密な上限制御が必要な場合は、DBロック（例: advisory lock）や更新時の競合制御を追加する運用を推奨。
+
+```sql
+CREATE TABLE token_budgets (
+  appid text NOT NULL,
+  modelid text NOT NULL,
+  token_budget bigint NOT NULL CHECK (token_budget >= 0),
+  PRIMARY KEY (appid, modelid)
+);
+
+CREATE TABLE token_usage_daily (
+  usage_date date NOT NULL,
+  appid text NOT NULL,
+  modelid text NOT NULL,
+  token bigint NOT NULL CHECK (token >= 0),
+  PRIMARY KEY (usage_date, appid, modelid)
+);
+```
 
 ### 認証
 
