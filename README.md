@@ -163,7 +163,7 @@ curl http://localhost:8080/health
 | `OPENAI_BASE_URL` | OpenAI APIベースURL | `https://api.openai.com` |
 | `GEMINI_BASE_URL` | Gemini APIベースURL | `https://generativelanguage.googleapis.com` |
 | `TAVILY_BASE_URL` | Tavily APIベースURL | `https://api.tavily.com` |
-| `TOKEN_BUDGET_ENABLED` | appid/modelid 単位のトークン予算管理を有効化 | `false` |
+| `TOKEN_BUDGET_ENABLED` | app_id/model_name 単位のトークン予算管理を有効化 | `false` |
 
 ### 設定ファイル (YAML)
 
@@ -223,45 +223,48 @@ environment_variables:
   - `litellm_key_header_name`: 認証ヘッダ名（未設定時は `Authorization`）
   - `log_request_body`: リクエストボディをログに記録するか（デフォルト: `true`）
   - `log_response_body`: レスポンスボディをログに記録するか（デフォルト: `true`）
-  - `token_budget_enabled`: `/v1/chat/completions` の予算管理を有効化するか（デフォルト: `false`）
+  - `token_budget_enabled`: `/v1/chat/completions` の予算管理を有効化するか（デフォルト: `false`）。`metadata.app_id` とログ保存時の `model_name` を使って判定する
   - `bedrock_include_reasoning`: Bedrock 応答中の `<reasoning>...</reasoning>` をそのまま返すか。未設定時は `false`
   - `required_metadata_keys`: `/v1/chat/completions` の `metadata` フィールドで必須とするキーのリスト。指定したキーが存在しないまたは空の場合は HTTP 400 を返す
 - `model_list`: `litellm_params.model` のプレフィックス (`openai/`, `gemini/`, `bedrock/`, `bedrock_openai/`) でプロバイダ判定
 - Bedrock 利用時 (`bedrock/`, `bedrock_openai/` 共通) は `litellm_params.region` を優先し、未指定なら `AWS_REGION` または `AWS_DEFAULT_REGION` を利用。`bedrock_openai/` は `api_base` でエンドポイントURLを上書き可能
 - `model_name` がある場合の個別設定は `model_name` 単位で保持されるため、同じ `litellm_params.model` を複数の別名で使っても `region` や `api_base` は上書きされない
+- PostgreSQL ログの `model_name` 列と token budget 判定には、`model_list.model_name` で指定した値（またはクライアントが直接指定した `model` 値）が使われる
+- PostgreSQL ログの `metadata.litellm_params` には、`litellm_params` のうち `model` / `api_base` / `region` / `search_provider` だけが保存される。`api_key` やその他のキーは保存されない
 - `search_tools`: 検索ツール設定（Tavily等）
 - `google_ai_studio_passthrough`: Geminiパススルー用APIキー設定
 - `environment_variables`: YAMLからOS環境変数をセット（既存の環境変数が優先）
 - `os.environ/VARNAME`: 環境変数参照構文（`api_key` 等で使用）
 
-### トークン予算管理（appid/modelid 単位）
+### トークン予算管理（app_id/model_name 単位）
 
 `general_settings.token_budget_enabled: true`（または `TOKEN_BUDGET_ENABLED=true`）時、`/v1/chat/completions` で invoke 前に日次予算チェックを行う。
 
-- `metadata.appid` / `metadata.modelid` が未指定または空の場合は 429
+- `metadata.app_id` が未指定または空の場合は 429
+- ログ保存に使う `model_name` が空の場合は 429
 - `token_budgets` テーブルに予算設定が無い場合は 429
 - 当日の累計が予算以上の場合は 429
 
 #### 重要: ソフトリミット
 
 予算はソフトリミットで、invoke 後に `usage.total_tokens` を `token_usage_daily` へ upsert 加算するため、1リクエストで予算超過することは許容される。
-また、同一 `appid/modelid` への同時リクエストが複数ある場合、事前チェックが同時に通過して超過量が大きくなる可能性がある。
+また、同一 `app_id/model_name` への同時リクエストが複数ある場合、事前チェックが同時に通過して超過量が大きくなる可能性がある。
 厳密な上限制御が必要な場合は、DBロック（例: advisory lock）や更新時の競合制御を追加する運用を推奨。
 
 ```sql
 CREATE TABLE token_budgets (
-  appid text NOT NULL,
-  modelid text NOT NULL,
+  app_id text NOT NULL,
+  model_name text NOT NULL,
   token_budget bigint NOT NULL CHECK (token_budget >= 0),
-  PRIMARY KEY (appid, modelid)
+  PRIMARY KEY (app_id, model_name)
 );
 
 CREATE TABLE token_usage_daily (
   usage_date date NOT NULL,
-  appid text NOT NULL,
-  modelid text NOT NULL,
+  app_id text NOT NULL,
+  model_name text NOT NULL,
   token bigint NOT NULL CHECK (token >= 0),
-  PRIMARY KEY (usage_date, appid, modelid)
+  PRIMARY KEY (usage_date, app_id, model_name)
 );
 ```
 
@@ -342,7 +345,7 @@ jq 'select(.chunk_index == null)' gollmproxy.log
 
 ### PostgreSQLへのログ出力
 
-JONLファイルに加えて、PostgreSQLへリクエストログを書き込める。モデル・トークン・メタデータは `llm_logs` に、リクエスト/レスポンスボディ全文は `llm_payloads` に格納される。書き込みは非同期（バッファ付きキュー）のため、リクエスト処理のレイテンシに影響しない。
+JSONLファイルに加えて、PostgreSQLへリクエストログを書き込める。モデル・トークン・メタデータは `llm_logs` に、リクエスト/レスポンスボディ全文は `llm_payloads` に格納される。書き込みは非同期（バッファ付きキュー）のため、リクエスト処理のレイテンシに影響しない。`/v1/chat/completions` の `model_name` 列には、`model_list.model_name` で設定した名前（別名を使わない場合はクライアントが指定した `model` 値）が保存される。
 
 #### テーブル作成
 
@@ -372,6 +375,21 @@ CREATE TABLE llm_payloads (
 ```
 
 `metadata` には `provider`, `path`, `status_code`, `latency_ms`, `user`, `client_ip` 等が自動的に格納される。リクエスト時に指定した `metadata` オブジェクトのキー（`app_id`, `dept_cd`, `user_id` 等）も同じカラムにマージされる。
+
+さらに `/v1/chat/completions` では、サーバー設定由来の `litellm_params` 情報が `metadata.litellm_params` に追加される。保存されるのは次のホワイトリストだけで、`api_key` やその他の設定値は保存されない。
+
+```json
+{
+  "litellm_params": {
+    "model": "openai/gpt-4o",
+    "api_base": "https://api.openai.com",
+    "region": "ap-northeast-1",
+    "search_provider": "tavily"
+  }
+}
+```
+
+`metadata.litellm_params` はサーバーが生成する予約領域で、同じキーがリクエスト metadata に含まれていてもサーバー設定の値で上書きされる。
 
 #### 接続設定
 
@@ -436,6 +454,18 @@ SELECT
 FROM llm_logs
 WHERE app_id IS NOT NULL
 GROUP BY app_id;
+
+-- app_id / model_name ごとの日次集計
+SELECT
+  app_id,
+  model_name,
+  count(*) AS requests,
+  sum(input_tokens) AS input_tokens,
+  sum(output_tokens) AS output_tokens
+FROM llm_logs
+WHERE created_at >= date_trunc('day', now())
+GROUP BY app_id, model_name
+ORDER BY app_id, model_name;
 
 -- エラーになったリクエストのボディを確認
 SELECT l.id, l.model_name, l.created_at,

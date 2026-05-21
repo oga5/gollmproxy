@@ -24,6 +24,8 @@ const (
 	tokenBudgetUpdateTimeout = 2 * time.Second
 )
 
+const logLitellmParamsMetadataKey = "litellm_params"
+
 func registerOpenAICompatRoutes(mux *http.ServeMux, cfg *Config, logger *RequestLogger) {
 	mux.HandleFunc("POST /v1/chat/completions", handleChatCompletions(cfg, logger))
 }
@@ -57,7 +59,7 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 		}
 
 		// Resolve model alias (model_name -> provider-prefixed model)
-		requestedModel := req.Model
+		requestedModel := strings.TrimSpace(req.Model)
 		modelField := requestedModel
 		if mapped, ok := cfg.ModelAliases[modelField]; ok {
 			modelField = mapped
@@ -73,6 +75,8 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 		} else if mc, ok := cfg.ModelConfigs[modelField]; ok {
 			perModelCfg = mc
 		}
+		logModelName := requestedModel
+		logMetadata := buildLogMetadata(req.Metadata, modelField, perModelCfg)
 
 		if !validModelName.MatchString(model) {
 			writeErrorJSON(w, http.StatusBadRequest, "invalid model name", "invalid_request_error")
@@ -80,15 +84,15 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 		}
 
 		if cfg.TokenBudgetEnabled && cfg.TokenBudgetStore != nil {
-			appID, modelID, err := extractBudgetIdentifiers(req.Metadata)
+			appID, modelName, err := extractBudgetIdentifiers(logMetadata, logModelName)
 			if err != nil {
-				writeErrorJSON(w, http.StatusTooManyRequests, "missing appid/modelid for budget control", "rate_limit_error")
+				writeErrorJSON(w, http.StatusTooManyRequests, "missing app_id/model_name for budget control", "rate_limit_error")
 				return
 			}
-			if err := cfg.TokenBudgetStore.CheckAllowed(r.Context(), appID, modelID, start); err != nil {
+			if err := cfg.TokenBudgetStore.CheckAllowed(r.Context(), appID, modelName, start); err != nil {
 				switch {
 				case errors.Is(err, ErrBudgetIdentifiersRequired):
-					writeErrorJSON(w, http.StatusTooManyRequests, "missing appid/modelid for budget control", "rate_limit_error")
+					writeErrorJSON(w, http.StatusTooManyRequests, "missing app_id/model_name for budget control", "rate_limit_error")
 					return
 				case errors.Is(err, ErrBudgetNotConfigured):
 					writeErrorJSON(w, http.StatusTooManyRequests, "token budget is not configured", "rate_limit_error")
@@ -108,17 +112,17 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 
 		switch provider {
 		case "openai":
-			handleOpenAIProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
+			handleOpenAIProvider(w, r, cfg, logger, req, model, logModelName, logMetadata, bodyBytes, reqID, start, perModelCfg)
 		case "gemini":
-			handleGeminiProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
+			handleGeminiProvider(w, r, cfg, logger, req, model, logModelName, logMetadata, bodyBytes, reqID, start, perModelCfg)
 		case "ollama_chat":
-			handleOllamaChatProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
+			handleOllamaChatProvider(w, r, cfg, logger, req, model, logModelName, logMetadata, bodyBytes, reqID, start, perModelCfg)
 		case "openrouter":
-			handleOpenRouterProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
+			handleOpenRouterProvider(w, r, cfg, logger, req, model, logModelName, logMetadata, bodyBytes, reqID, start, perModelCfg)
 		case "bedrock":
-			handleBedrockProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
+			handleBedrockProvider(w, r, cfg, logger, req, model, logModelName, logMetadata, bodyBytes, reqID, start, perModelCfg)
 		case "bedrock_openai":
-			handleBedrockOpenAIProvider(w, r, cfg, logger, req, model, bodyBytes, reqID, start, perModelCfg)
+			handleBedrockOpenAIProvider(w, r, cfg, logger, req, model, logModelName, logMetadata, bodyBytes, reqID, start, perModelCfg)
 		default:
 			writeErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("unsupported provider: %s", provider), "invalid_request_error")
 		}
@@ -135,7 +139,7 @@ func parseModelPrefix(model string) (provider, modelName string) {
 	return "openai", model
 }
 
-func forwardOpenAICompatChat(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, provider, providerLabel, model, targetURL, authHeader string, bodyBytes, upstreamBody []byte, reqID string, start time.Time) {
+func forwardOpenAICompatChat(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, provider, providerLabel, logModelName, targetURL, authHeader string, metadata map[string]any, bodyBytes, upstreamBody []byte, reqID string, start time.Time) {
 	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream)
 	defer cancel()
 
@@ -157,12 +161,12 @@ func forwardOpenAICompatChat(w http.ResponseWriter, r *http.Request, cfg *Config
 	}
 	defer resp.Body.Close()
 
-	handleOpenAICompatResponse(w, r, cfg, logger, req, provider, model, resp, bodyBytes, reqID, start)
+	handleOpenAICompatResponse(w, r, cfg, logger, req, provider, logModelName, metadata, resp, bodyBytes, reqID, start)
 }
 
 // handleOpenAICompatResponse handles an upstream OpenAI-compatible response,
 // streaming or non-streaming, and writes a log entry.
-func handleOpenAICompatResponse(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, provider, model string, resp *http.Response, bodyBytes []byte, reqID string, start time.Time) {
+func handleOpenAICompatResponse(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, provider, logModelName string, metadata map[string]any, resp *http.Response, bodyBytes []byte, reqID string, start time.Time) {
 	if req.Stream {
 		setSSEHeaders(w)
 		var chunks []string
@@ -175,7 +179,7 @@ func handleOpenAICompatResponse(w http.ResponseWriter, r *http.Request, cfg *Con
 		if err := proxySSEStream(w, resp.Body, nil, onChunk); err != nil {
 			slog.Error("streaming error", "error", err)
 		}
-		logRequest(logger, cfg, reqID, r, provider, model, true, resp.StatusCode, start, string(bodyBytes), strings.Join(chunks, "\n"), req.User, req.Metadata, nil)
+		logRequest(logger, cfg, reqID, r, provider, logModelName, true, resp.StatusCode, start, string(bodyBytes), strings.Join(chunks, "\n"), req.User, metadata, nil)
 		return
 	}
 
@@ -201,10 +205,10 @@ func handleOpenAICompatResponse(w http.ResponseWriter, r *http.Request, cfg *Con
 	if json.Unmarshal(respBody, &openaiResp) == nil {
 		usage = openaiResp.Usage
 	}
-	logRequest(logger, cfg, reqID, r, provider, model, false, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, req.Metadata, usage)
+	logRequest(logger, cfg, reqID, r, provider, logModelName, false, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, metadata, usage)
 }
 
-func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
+func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model, logModelName string, metadata map[string]any, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
 	apiKey := perModelCfg.APIKey
 	if apiKey == "" {
 		apiKey = cfg.OpenAIAPIKey
@@ -223,7 +227,7 @@ func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 	}
 	targetURL := baseURL + "/v1/chat/completions"
 
-	forwardOpenAICompatChat(w, r, cfg, logger, req, "openai", "openai", model, targetURL, "Bearer "+apiKey, bodyBytes, modifiedBody, reqID, start)
+	forwardOpenAICompatChat(w, r, cfg, logger, req, "openai", "openai", logModelName, targetURL, "Bearer "+apiKey, metadata, bodyBytes, modifiedBody, reqID, start)
 }
 
 // rewriteModelField replaces the model field value in the JSON body.
@@ -265,7 +269,7 @@ func mergeExtraParams(body []byte, extraParams map[string]interface{}) []byte {
 	return result
 }
 
-func handleOllamaChatProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
+func handleOllamaChatProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model, logModelName string, metadata map[string]any, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
 	// Rewrite model field (strip provider prefix) and merge per-model extra params
 	modifiedBody := mergeExtraParams(rewriteModelField(bodyBytes, model), perModelCfg.ExtraParams)
 
@@ -278,10 +282,10 @@ func handleOllamaChatProvider(w http.ResponseWriter, r *http.Request, cfg *Confi
 	if apiKey := perModelCfg.APIKey; apiKey != "" {
 		authHeader = "Bearer " + apiKey
 	}
-	forwardOpenAICompatChat(w, r, cfg, logger, req, "ollama_chat", "ollama", model, targetURL, authHeader, bodyBytes, modifiedBody, reqID, start)
+	forwardOpenAICompatChat(w, r, cfg, logger, req, "ollama_chat", "ollama", logModelName, targetURL, authHeader, metadata, bodyBytes, modifiedBody, reqID, start)
 }
 
-func handleOpenRouterProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
+func handleOpenRouterProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model, logModelName string, metadata map[string]any, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
 	apiKey := perModelCfg.APIKey
 	if apiKey == "" {
 		apiKey = cfg.OpenRouterAPIKey
@@ -300,10 +304,10 @@ func handleOpenRouterProvider(w http.ResponseWriter, r *http.Request, cfg *Confi
 	}
 	targetURL := baseURL + "/v1/chat/completions"
 
-	forwardOpenAICompatChat(w, r, cfg, logger, req, "openrouter", "openrouter", model, targetURL, "Bearer "+apiKey, bodyBytes, modifiedBody, reqID, start)
+	forwardOpenAICompatChat(w, r, cfg, logger, req, "openrouter", "openrouter", logModelName, targetURL, "Bearer "+apiKey, metadata, bodyBytes, modifiedBody, reqID, start)
 }
 
-func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
+func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model, logModelName string, metadata map[string]any, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
 	apiKey := perModelCfg.APIKey
 	if apiKey == "" {
 		apiKey = cfg.GeminiAPIKey
@@ -369,18 +373,18 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 		}
 		slog.Error("gemini API error", "request_id", reqID, "status", resp.StatusCode, "body", string(respBody))
 		writeErrorJSON(w, resp.StatusCode, "gemini API error", "server_error")
-		logRequest(logger, cfg, reqID, r, "gemini", model, req.Stream, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, req.Metadata, nil)
+		logRequest(logger, cfg, reqID, r, "gemini", logModelName, req.Stream, resp.StatusCode, start, string(bodyBytes), string(respBody), req.User, metadata, nil)
 		return
 	}
 
 	if req.Stream {
-		handleGeminiStream(w, resp, cfg, model, reqID, logger, r, bodyBytes, start, req.User, req.Metadata)
+		handleGeminiStream(w, resp, cfg, model, logModelName, reqID, logger, r, bodyBytes, start, req.User, metadata)
 	} else {
-		handleGeminiNonStream(w, resp, cfg, model, reqID, logger, r, bodyBytes, start, req.User, req.Metadata)
+		handleGeminiNonStream(w, resp, cfg, model, logModelName, reqID, logger, r, bodyBytes, start, req.User, metadata)
 	}
 }
 
-func handleGeminiNonStream(w http.ResponseWriter, resp *http.Response, cfg *Config, model, reqID string, logger *RequestLogger, r *http.Request, bodyBytes []byte, start time.Time, user string, metadata map[string]any) {
+func handleGeminiNonStream(w http.ResponseWriter, resp *http.Response, cfg *Config, model, logModelName, reqID string, logger *RequestLogger, r *http.Request, bodyBytes []byte, start time.Time, user string, metadata map[string]any) {
 	respBody, err := readUpstreamBody(resp.Body, maxResponseSize)
 	if err != nil {
 		slog.Warn("failed to read gemini upstream response", "request_id", reqID, "error", err)
@@ -404,10 +408,10 @@ func handleGeminiNonStream(w http.ResponseWriter, resp *http.Response, cfg *Conf
 		return
 	}
 
-	logRequest(logger, cfg, reqID, r, "gemini", model, false, http.StatusOK, start, string(bodyBytes), string(openaiBody), user, metadata, openaiResp.Usage)
+	logRequest(logger, cfg, reqID, r, "gemini", logModelName, false, http.StatusOK, start, string(bodyBytes), string(openaiBody), user, metadata, openaiResp.Usage)
 }
 
-func handleGeminiStream(w http.ResponseWriter, resp *http.Response, cfg *Config, model, reqID string, logger *RequestLogger, r *http.Request, bodyBytes []byte, start time.Time, user string, metadata map[string]any) {
+func handleGeminiStream(w http.ResponseWriter, resp *http.Response, cfg *Config, model, logModelName, reqID string, logger *RequestLogger, r *http.Request, bodyBytes []byte, start time.Time, user string, metadata map[string]any) {
 	isFirst := true
 
 	transformLine := func(data []byte) ([]byte, error) {
@@ -440,15 +444,15 @@ func handleGeminiStream(w http.ResponseWriter, resp *http.Response, cfg *Config,
 		flusher.Flush()
 	}
 
-	logRequest(logger, cfg, reqID, r, "gemini", model, true, http.StatusOK, start, string(bodyBytes), strings.Join(chunks, "\n"), user, metadata, nil)
+	logRequest(logger, cfg, reqID, r, "gemini", logModelName, true, http.StatusOK, start, string(bodyBytes), strings.Join(chunks, "\n"), user, metadata, nil)
 }
 
-func logRequest(logger *RequestLogger, cfg *Config, reqID string, r *http.Request, provider, model string, stream bool, statusCode int, start time.Time, reqBody, respBody string, user string, metadata map[string]any, usage *OpenAIUsage) {
+func logRequest(logger *RequestLogger, cfg *Config, reqID string, r *http.Request, provider, modelName string, stream bool, statusCode int, start time.Time, reqBody, respBody string, user string, metadata map[string]any, usage *OpenAIUsage) {
 	if cfg.TokenBudgetEnabled && cfg.TokenBudgetStore != nil && usage != nil && usage.TotalTokens > 0 && statusCode >= 200 && statusCode < 300 {
-		if appID, modelID, err := extractBudgetIdentifiers(metadata); err == nil {
+		if appID, modelName, err := extractBudgetIdentifiers(metadata, modelName); err == nil {
 			ctx, cancel := context.WithTimeout(r.Context(), tokenBudgetUpdateTimeout)
 			defer cancel()
-			if err := cfg.TokenBudgetStore.AddUsage(ctx, appID, modelID, usage.TotalTokens, start); err != nil {
+			if err := cfg.TokenBudgetStore.AddUsage(ctx, appID, modelName, usage.TotalTokens, start); err != nil {
 				slog.Warn("failed to update token usage", "request_id", reqID, "error", err)
 			}
 		}
@@ -462,7 +466,7 @@ func logRequest(logger *RequestLogger, cfg *Config, reqID string, r *http.Reques
 		User:       user,
 		Metadata:   metadata,
 		Provider:   provider,
-		Model:      model,
+		Model:      modelName,
 		Stream:     stream,
 		StatusCode: statusCode,
 		LatencyMs:  time.Since(start).Milliseconds(),
@@ -480,4 +484,35 @@ func logRequest(logger *RequestLogger, cfg *Config, reqID string, r *http.Reques
 		entry.RespBody = respBody
 	}
 	logger.Log(entry)
+}
+
+// buildLogMetadata clones request metadata and injects server-side litellm_params metadata.
+// metadata.litellm_params is reserved for proxy-generated values and always overwrites any client-provided value.
+func buildLogMetadata(metadata map[string]any, configuredModel string, perModelCfg ModelConfig) map[string]any {
+	litellmParams := make(map[string]any, 4)
+	if configuredModel != "" {
+		litellmParams["model"] = configuredModel
+	}
+	if perModelCfg.APIBase != "" {
+		litellmParams["api_base"] = perModelCfg.APIBase
+	}
+	if perModelCfg.Region != "" {
+		litellmParams["region"] = perModelCfg.Region
+	}
+	if perModelCfg.SearchProvider != "" {
+		litellmParams["search_provider"] = perModelCfg.SearchProvider
+	}
+
+	if len(metadata) == 0 && len(litellmParams) == 0 {
+		return nil
+	}
+
+	merged := make(map[string]any, len(metadata)+1)
+	for k, v := range metadata {
+		merged[k] = v
+	}
+	if len(litellmParams) > 0 {
+		merged[logLitellmParamsMetadataKey] = litellmParams
+	}
+	return merged
 }
