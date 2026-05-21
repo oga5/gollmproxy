@@ -14,25 +14,25 @@ type mockTokenBudgetStore struct {
 	checkCalls int
 	addCalls   int
 
-	lastCheckAppID   string
-	lastCheckModelID string
+	lastCheckAppID     string
+	lastCheckModelName string
 
-	lastAddAppID   string
-	lastAddModelID string
-	lastAddTokens  int
+	lastAddAppID     string
+	lastAddModelName string
+	lastAddTokens    int
 }
 
-func (f *mockTokenBudgetStore) CheckAllowed(_ context.Context, appID, modelID string, _ time.Time) error {
+func (f *mockTokenBudgetStore) CheckAllowed(_ context.Context, appID, modelName string, _ time.Time) error {
 	f.checkCalls++
 	f.lastCheckAppID = appID
-	f.lastCheckModelID = modelID
+	f.lastCheckModelName = modelName
 	return f.checkErr
 }
 
-func (f *mockTokenBudgetStore) AddUsage(_ context.Context, appID, modelID string, tokens int, _ time.Time) error {
+func (f *mockTokenBudgetStore) AddUsage(_ context.Context, appID, modelName string, tokens int, _ time.Time) error {
 	f.addCalls++
 	f.lastAddAppID = appID
-	f.lastAddModelID = modelID
+	f.lastAddModelName = modelName
 	f.lastAddTokens = tokens
 	return f.addErr
 }
@@ -54,7 +54,7 @@ func TestChatCompletionsTokenBudgetMissingIdentifiersReturns429(t *testing.T) {
 	rr := postJSON(t, handler, "/v1/chat/completions", map[string]any{
 		"model":    "gpt-4o",
 		"messages": []map[string]string{{"role": "user", "content": "hi"}},
-		"metadata": map[string]any{"appid": "app-only"},
+		"metadata": map[string]any{},
 	})
 
 	if rr.Code != http.StatusTooManyRequests {
@@ -82,7 +82,7 @@ func TestChatCompletionsTokenBudgetNotConfiguredReturns429(t *testing.T) {
 	rr := postJSON(t, handler, "/v1/chat/completions", map[string]any{
 		"model":    "gpt-4o",
 		"messages": []map[string]string{{"role": "user", "content": "hi"}},
-		"metadata": map[string]any{"appid": "app1", "modelid": "modelA"},
+		"metadata": map[string]any{"app_id": "app1"},
 	})
 
 	if rr.Code != http.StatusTooManyRequests {
@@ -90,6 +90,9 @@ func TestChatCompletionsTokenBudgetNotConfiguredReturns429(t *testing.T) {
 	}
 	if store.checkCalls != 1 {
 		t.Fatalf("expected one budget check, got %d", store.checkCalls)
+	}
+	if store.lastCheckAppID != "app1" || store.lastCheckModelName != "gpt-4o" {
+		t.Fatalf("unexpected check identifiers: app_id=%q model_name=%q", store.lastCheckAppID, store.lastCheckModelName)
 	}
 }
 
@@ -111,7 +114,7 @@ func TestChatCompletionsTokenBudgetAddsUsageAfterInvoke(t *testing.T) {
 	rr := postJSON(t, handler, "/v1/chat/completions", map[string]any{
 		"model":    "gpt-4o",
 		"messages": []map[string]string{{"role": "user", "content": "hi"}},
-		"metadata": map[string]any{"appid": "app1", "modelid": "modelA"},
+		"metadata": map[string]any{"app_id": "app1"},
 	})
 
 	if rr.Code != http.StatusOK {
@@ -123,10 +126,27 @@ func TestChatCompletionsTokenBudgetAddsUsageAfterInvoke(t *testing.T) {
 	if store.addCalls != 1 {
 		t.Fatalf("expected one usage update, got %d", store.addCalls)
 	}
-	if store.lastAddAppID != "app1" || store.lastAddModelID != "modelA" {
-		t.Fatalf("unexpected add identifiers: appid=%q modelid=%q", store.lastAddAppID, store.lastAddModelID)
+	if store.lastAddAppID != "app1" || store.lastAddModelName != "gpt-4o" {
+		t.Fatalf("unexpected add identifiers: app_id=%q model_name=%q", store.lastAddAppID, store.lastAddModelName)
 	}
 	if store.lastAddTokens != 5 {
 		t.Fatalf("unexpected added tokens: %d", store.lastAddTokens)
+	}
+}
+
+func TestExtractBudgetIdentifiersRequiresAppIDAndModelName(t *testing.T) {
+	appID, modelName, err := extractBudgetIdentifiers(map[string]any{"app_id": "app1"}, "gpt-4o")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if appID != "app1" || modelName != "gpt-4o" {
+		t.Fatalf("unexpected identifiers: app_id=%q model_name=%q", appID, modelName)
+	}
+
+	if _, _, err := extractBudgetIdentifiers(map[string]any{}, "gpt-4o"); err == nil {
+		t.Fatal("expected error for missing app_id")
+	}
+	if _, _, err := extractBudgetIdentifiers(map[string]any{"app_id": "app1"}, ""); err == nil {
+		t.Fatal("expected error for missing model_name")
 	}
 }

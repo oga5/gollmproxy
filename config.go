@@ -52,7 +52,7 @@ type Config struct {
 	// When set, log entries are written to llm_logs / llm_payloads tables in addition to the log file.
 	PostgresDSN string
 
-	// TokenBudgetEnabled enables appid/modelid daily token budget checks.
+	// TokenBudgetEnabled enables app_id/model_name daily token budget checks.
 	TokenBudgetEnabled bool
 
 	// TokenBudgetStore manages token budget checks and usage updates.
@@ -69,10 +69,11 @@ type Config struct {
 
 // ModelConfig holds per-model configuration overrides.
 type ModelConfig struct {
-	APIKey      string
-	APIBase     string
-	Region      string
-	ExtraParams map[string]interface{}
+	APIKey         string
+	APIBase        string
+	Region         string
+	SearchProvider string
+	ExtraParams    map[string]interface{}
 }
 
 // PassThroughEndpoint defines a custom pass-through proxy endpoint.
@@ -103,12 +104,13 @@ type modelInfo struct {
 }
 
 type modelParams struct {
-	Model         string                 `yaml:"model"`
-	APIKey        string                 `yaml:"api_key"`
-	APIBase       string                 `yaml:"api_base"`
-	Region        string                 `yaml:"region"`
-	AwsRegionName string                 `yaml:"aws_region_name"`
-	ExtraParams   map[string]interface{} `yaml:"extra_params"`
+	Model          string                 `yaml:"model"`
+	APIKey         string                 `yaml:"api_key"`
+	APIBase        string                 `yaml:"api_base"`
+	Region         string                 `yaml:"region"`
+	SearchProvider string                 `yaml:"search_provider"`
+	AwsRegionName  string                 `yaml:"aws_region_name"`
+	ExtraParams    map[string]interface{} `yaml:"extra_params"`
 }
 
 type generalSettings struct {
@@ -367,6 +369,7 @@ func loadYAMLConfig(path string, cfg *Config) {
 		apiKey := resolveEnvRef(entry.Params.APIKey)
 		apiBase := entry.Params.APIBase
 		region := resolveEnvRef(entry.Params.Region)
+		searchProvider := resolveEnvRef(entry.Params.SearchProvider)
 		if v := resolveEnvRef(entry.Params.AwsRegionName); v != "" {
 			region = v
 		}
@@ -390,12 +393,13 @@ func loadYAMLConfig(path string, cfg *Config) {
 		if entry.ModelName != "" {
 			configKey = entry.ModelName
 		}
-		if configKey != "" && (apiKey != "" || apiBase != "" || region != "" || len(entry.Params.ExtraParams) > 0) {
+		if configKey != "" && (apiKey != "" || apiBase != "" || region != "" || searchProvider != "" || len(entry.Params.ExtraParams) > 0) {
 			cfg.ModelConfigs[configKey] = ModelConfig{
-				APIKey:      apiKey,
-				APIBase:     apiBase,
-				Region:      region,
-				ExtraParams: entry.Params.ExtraParams,
+				APIKey:         apiKey,
+				APIBase:        apiBase,
+				Region:         region,
+				SearchProvider: searchProvider,
+				ExtraParams:    entry.Params.ExtraParams,
 			}
 		}
 

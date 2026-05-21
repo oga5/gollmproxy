@@ -14,7 +14,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 )
 
-func handleBedrockOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
+func handleBedrockOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model, logModelName string, metadata map[string]any, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
 	region := perModelCfg.Region
 	if region == "" {
 		region = cfg.BedrockRegion
@@ -77,5 +77,5 @@ func handleBedrockOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Co
 	}
 	defer resp.Body.Close()
 
-	handleOpenAICompatResponse(w, r, cfg, logger, req, "bedrock_openai", model, resp, bodyBytes, reqID, start)
+	handleOpenAICompatResponse(w, r, cfg, logger, req, "bedrock_openai", logModelName, metadata, resp, bodyBytes, reqID, start)
 }

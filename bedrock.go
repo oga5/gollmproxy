@@ -33,7 +33,7 @@ var newBedrockClient = func(ctx context.Context, region string) (bedrockClient, 
 	return bedrockruntime.NewFromConfig(awsCfg), nil
 }
 
-func handleBedrockProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
+func handleBedrockProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model, logModelName string, metadata map[string]any, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
 	_, strippedBody := extractAndStripMetadata(bodyBytes)
 	modifiedBody := mergeExtraParams(rewriteModelField(strippedBody, model), perModelCfg.ExtraParams)
 	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream)
@@ -56,7 +56,7 @@ func handleBedrockProvider(w http.ResponseWriter, r *http.Request, cfg *Config, 
 	}
 
 	if req.Stream {
-		handleBedrockStream(w, r, cfg, logger, req, model, modifiedBody, reqID, start, client, region)
+		handleBedrockStream(w, r, cfg, logger, req, model, logModelName, metadata, modifiedBody, reqID, start, client, region)
 		return
 	}
 
@@ -101,10 +101,10 @@ func handleBedrockProvider(w http.ResponseWriter, r *http.Request, cfg *Config, 
 		usage = openaiResp.Usage
 	}
 
-	logRequest(logger, cfg, reqID, r, "bedrock", model, false, http.StatusOK, start, string(modifiedBody), string(respBody), req.User, req.Metadata, usage)
+	logRequest(logger, cfg, reqID, r, "bedrock", logModelName, false, http.StatusOK, start, string(modifiedBody), string(respBody), req.User, metadata, usage)
 }
 
-func handleBedrockStream(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model string, modifiedBody []byte, reqID string, start time.Time, client bedrockClient, region string) {
+func handleBedrockStream(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model, logModelName string, metadata map[string]any, modifiedBody []byte, reqID string, start time.Time, client bedrockClient, region string) {
 	resp, err := client.InvokeModelWithResponseStream(r.Context(), &bedrockruntime.InvokeModelWithResponseStreamInput{
 		ModelId:     &model,
 		Body:        modifiedBody,
@@ -167,7 +167,7 @@ func handleBedrockStream(w http.ResponseWriter, r *http.Request, cfg *Config, lo
 		} else {
 			slog.Error("bedrock stream read error", "request_id", reqID, "region", region, "model", model, "error", err)
 		}
-		logRequest(logger, cfg, reqID, r, "bedrock", model, true, http.StatusBadGateway, start, string(modifiedBody), "", req.User, req.Metadata, nil)
+		logRequest(logger, cfg, reqID, r, "bedrock", logModelName, true, http.StatusBadGateway, start, string(modifiedBody), "", req.User, metadata, nil)
 		return
 	}
 
@@ -183,7 +183,7 @@ func handleBedrockStream(w http.ResponseWriter, r *http.Request, cfg *Config, lo
 	flusher.Flush()
 
 	respBody := strings.Join(chunks, "\n")
-	logRequest(logger, cfg, reqID, r, "bedrock", model, true, http.StatusOK, start, string(modifiedBody), respBody, req.User, req.Metadata, usage)
+	logRequest(logger, cfg, reqID, r, "bedrock", logModelName, true, http.StatusOK, start, string(modifiedBody), respBody, req.User, metadata, usage)
 }
 
 func stringPtr(s string) *string {
