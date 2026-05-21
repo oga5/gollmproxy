@@ -486,6 +486,8 @@ func logRequest(logger *RequestLogger, cfg *Config, reqID string, r *http.Reques
 	logger.Log(entry)
 }
 
+// buildLogMetadata clones request metadata and injects server-side litellm_params metadata.
+// metadata.litellm_params is reserved for proxy-generated values and always overwrites any client-provided value.
 func buildLogMetadata(metadata map[string]any, configuredModel string, perModelCfg ModelConfig) map[string]any {
 	litellmParams := make(map[string]any, 4)
 	if configuredModel != "" {

@@ -63,6 +63,9 @@ func TestChatCompletionsTokenBudgetMissingIdentifiersReturns429(t *testing.T) {
 	if store.checkCalls != 0 {
 		t.Fatalf("expected budget check not to run when ids are missing, got %d", store.checkCalls)
 	}
+	if store.addCalls != 0 {
+		t.Fatalf("expected usage update not to run when ids are missing, got %d", store.addCalls)
+	}
 }
 
 func TestChatCompletionsTokenBudgetNotConfiguredReturns429(t *testing.T) {
