@@ -175,8 +175,18 @@ general_settings:
   litellm_key_header_name: X-Litellm-Api-Key
   port: 8080
   log_file: "gollmproxy.log"
+  server_read_timeout: 30s
+  server_write_timeout: 0s
+  server_idle_timeout: 2m
   log_request_body: true
   log_response_body: true
+  upstream_non_stream_timeout: 5m
+  upstream_dial_timeout: 10s
+  upstream_keep_alive_timeout: 30s
+  upstream_tls_handshake_timeout: 10s
+  upstream_response_header_timeout: 30s
+  upstream_expect_continue_timeout: 1s
+  upstream_idle_conn_timeout: 90s
   token_budget_enabled: false
   bedrock_include_reasoning: false
   required_metadata_keys:
@@ -221,8 +231,11 @@ environment_variables:
 - `general_settings`: ポート・ログファイル・認証・ログ出力設定
   - `master_key`: プロキシへのアクセスを制限するAPIキー（`os.environ/` 構文対応）
   - `litellm_key_header_name`: 認証ヘッダ名（未設定時は `Authorization`）
+  - `server_read_timeout` / `server_write_timeout` / `server_idle_timeout`: プロキシHTTPサーバーの `ReadTimeout` / `WriteTimeout` / `IdleTimeout`。Goのduration形式（例: `30s`, `2m`, `0s`）
   - `log_request_body`: リクエストボディをログに記録するか（デフォルト: `true`）
   - `log_response_body`: レスポンスボディをログに記録するか（デフォルト: `true`）
+  - `upstream_non_stream_timeout`: 非ストリーミング上流リクエストのコンテキストタイムアウト（Goのduration形式）
+  - `upstream_dial_timeout` / `upstream_keep_alive_timeout` / `upstream_tls_handshake_timeout` / `upstream_response_header_timeout` / `upstream_expect_continue_timeout` / `upstream_idle_conn_timeout`: 上流接続用 `http.Transport` の各timeout（Goのduration形式）
   - `token_budget_enabled`: `/v1/chat/completions` の予算管理を有効化するか（デフォルト: `false`）。`metadata.app_id` とログ保存時の `model_name` を使って判定する
   - `bedrock_include_reasoning`: Bedrock 応答中の `<reasoning>...</reasoning>` をそのまま返すか。未設定時は `false`
   - `required_metadata_keys`: `/v1/chat/completions` の `metadata` フィールドで必須とするキーのリスト。指定したキーが存在しないまたは空の場合は HTTP 400 を返す

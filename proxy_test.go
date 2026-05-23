@@ -76,6 +76,59 @@ func TestHTTPClientUsesTransportTimeoutsForStreamingSafety(t *testing.T) {
 	}
 }
 
+func TestConfigureUpstreamTimeoutsAppliesConfig(t *testing.T) {
+	oldNonStream := upstreamNonStreamTimeout
+	oldDial := upstreamDialTimeout
+	oldKeepAlive := upstreamKeepAlive
+	oldTLS := upstreamTLSHandshakeTimeout
+	oldHeader := upstreamResponseHeaderTimeout
+	oldExpect := upstreamExpectContinueTimeout
+	oldIdle := upstreamIdleConnTimeout
+	defer func() {
+		upstreamNonStreamTimeout = oldNonStream
+		upstreamDialTimeout = oldDial
+		upstreamKeepAlive = oldKeepAlive
+		upstreamTLSHandshakeTimeout = oldTLS
+		upstreamResponseHeaderTimeout = oldHeader
+		upstreamExpectContinueTimeout = oldExpect
+		upstreamIdleConnTimeout = oldIdle
+		httpClient.Transport = newUpstreamTransport()
+	}()
+
+	cfg := &Config{
+		UpstreamNonStreamTimeout:      42 * time.Second,
+		UpstreamDialTimeout:           2 * time.Second,
+		UpstreamKeepAlive:             11 * time.Second,
+		UpstreamTLSHandshakeTimeout:   3 * time.Second,
+		UpstreamResponseHeaderTimeout: 4 * time.Second,
+		UpstreamExpectContinueTimeout: 5 * time.Second,
+		UpstreamIdleConnTimeout:       6 * time.Second,
+	}
+
+	configureUpstreamTimeouts(cfg)
+
+	if upstreamNonStreamTimeout != cfg.UpstreamNonStreamTimeout {
+		t.Fatalf("unexpected upstreamNonStreamTimeout: got %v want %v", upstreamNonStreamTimeout, cfg.UpstreamNonStreamTimeout)
+	}
+
+	transport, ok := httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("httpClient.Transport has unexpected type %T", httpClient.Transport)
+	}
+	if transport.ResponseHeaderTimeout != cfg.UpstreamResponseHeaderTimeout {
+		t.Fatalf("unexpected ResponseHeaderTimeout: got %v want %v", transport.ResponseHeaderTimeout, cfg.UpstreamResponseHeaderTimeout)
+	}
+	if transport.TLSHandshakeTimeout != cfg.UpstreamTLSHandshakeTimeout {
+		t.Fatalf("unexpected TLSHandshakeTimeout: got %v want %v", transport.TLSHandshakeTimeout, cfg.UpstreamTLSHandshakeTimeout)
+	}
+	if transport.ExpectContinueTimeout != cfg.UpstreamExpectContinueTimeout {
+		t.Fatalf("unexpected ExpectContinueTimeout: got %v want %v", transport.ExpectContinueTimeout, cfg.UpstreamExpectContinueTimeout)
+	}
+	if transport.IdleConnTimeout != cfg.UpstreamIdleConnTimeout {
+		t.Fatalf("unexpected IdleConnTimeout: got %v want %v", transport.IdleConnTimeout, cfg.UpstreamIdleConnTimeout)
+	}
+}
+
 func TestRedactSensitiveURLRedactsKnownKeys(t *testing.T) {
 	rawURL := "https://example.com/v1beta/models/test:generateContent?alt=sse&key=secret&token=abc&keep=ok"
 
