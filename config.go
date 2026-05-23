@@ -369,7 +369,6 @@ func loadYAMLConfig(path string, cfg *Config) {
 			slog.Warn("skipping pass_through_endpoint with empty path or target")
 			continue
 		}
-
 		headers := make(map[string]string, len(ep.Headers))
 		for k, v := range ep.Headers {
 			headers[k] = resolveEnvRef(v)
