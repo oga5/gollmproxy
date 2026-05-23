@@ -71,6 +71,8 @@ func configureUpstreamTimeouts(cfg *Config) {
 	upstreamIdleConnTimeout = fallbackPositiveDuration(cfg.UpstreamIdleConnTimeout, defaultUpstreamIdleConnTimeout)
 
 	if oldTransport, ok := httpClient.Transport.(*http.Transport); ok {
+		// Drop idle pooled connections created with the previous timeout settings
+		// before swapping in a newly configured transport.
 		oldTransport.CloseIdleConnections()
 	}
 	httpClient.Transport = newUpstreamTransport()
