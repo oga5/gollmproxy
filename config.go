@@ -483,7 +483,7 @@ func applyDurationSetting(name, value string, dst *time.Duration) {
 	}
 	d, err := time.ParseDuration(value)
 	if err != nil {
-		slog.Warn("invalid duration in config, using default/current value", "name", name, "value", value, "error", err)
+		slog.Warn("invalid duration in config, keeping current/default value", "name", name, "value", value, "error", err)
 		return
 	}
 	*dst = d
