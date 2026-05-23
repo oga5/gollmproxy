@@ -21,6 +21,8 @@ type contextKey string
 const requestIDKey contextKey = "request_id"
 
 func NewServer(cfg *Config, logger *RequestLogger) http.Handler {
+	configureUpstreamTimeouts(cfg)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -65,8 +67,8 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 }
 
 const (
-	authMaxFailures      = 10
-	authLockoutDuration  = 5 * time.Minute
+	authMaxFailures     = 10
+	authLockoutDuration = 5 * time.Minute
 )
 
 type lockoutEntry struct {

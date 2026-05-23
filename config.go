@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -14,6 +15,10 @@ import (
 type Config struct {
 	Port    int
 	LogFile string
+
+	ServerReadTimeout  time.Duration
+	ServerWriteTimeout time.Duration
+	ServerIdleTimeout  time.Duration
 
 	LogRequestBody  bool
 	LogResponseBody bool
@@ -65,6 +70,14 @@ type Config struct {
 	// RequiredMetadataKeys lists metadata keys that must be present and non-empty
 	// in every /v1/chat/completions request. Missing keys result in a 400 error.
 	RequiredMetadataKeys []string
+
+	UpstreamNonStreamTimeout      time.Duration
+	UpstreamDialTimeout           time.Duration
+	UpstreamKeepAlive             time.Duration
+	UpstreamTLSHandshakeTimeout   time.Duration
+	UpstreamResponseHeaderTimeout time.Duration
+	UpstreamExpectContinueTimeout time.Duration
+	UpstreamIdleConnTimeout       time.Duration
 }
 
 // ModelConfig holds per-model configuration overrides.
@@ -114,19 +127,29 @@ type modelParams struct {
 }
 
 type generalSettings struct {
-	Port                    int                       `yaml:"port"`
-	LogFile                 string                    `yaml:"log_file"`
-	LogRequestBody          *bool                     `yaml:"log_request_body"`
-	LogResponseBody         *bool                     `yaml:"log_response_body"`
-	BedrockIncludeReasoning *bool                     `yaml:"bedrock_include_reasoning"`
-	MasterKey               string                    `yaml:"master_key"`
-	KeyHeaderName           string                    `yaml:"litellm_key_header_name"`
-	TrustedProxyHeader      string                    `yaml:"trusted_proxy_header"`
-	TrustedProxyCIDRs       []string                  `yaml:"trusted_proxy_cidrs"`
-	PostgresDSN             string                    `yaml:"postgres_dsn"`
-	TokenBudgetEnabled      *bool                     `yaml:"token_budget_enabled"`
-	PassThroughEndpoints    []yamlPassThroughEndpoint `yaml:"pass_through_endpoints"`
-	RequiredMetadataKeys    []string                  `yaml:"required_metadata_keys"`
+	Port                          int                       `yaml:"port"`
+	LogFile                       string                    `yaml:"log_file"`
+	ServerReadTimeout             string                    `yaml:"server_read_timeout"`
+	ServerWriteTimeout            string                    `yaml:"server_write_timeout"`
+	ServerIdleTimeout             string                    `yaml:"server_idle_timeout"`
+	LogRequestBody                *bool                     `yaml:"log_request_body"`
+	LogResponseBody               *bool                     `yaml:"log_response_body"`
+	BedrockIncludeReasoning       *bool                     `yaml:"bedrock_include_reasoning"`
+	MasterKey                     string                    `yaml:"master_key"`
+	KeyHeaderName                 string                    `yaml:"litellm_key_header_name"`
+	TrustedProxyHeader            string                    `yaml:"trusted_proxy_header"`
+	TrustedProxyCIDRs             []string                  `yaml:"trusted_proxy_cidrs"`
+	PostgresDSN                   string                    `yaml:"postgres_dsn"`
+	TokenBudgetEnabled            *bool                     `yaml:"token_budget_enabled"`
+	PassThroughEndpoints          []yamlPassThroughEndpoint `yaml:"pass_through_endpoints"`
+	RequiredMetadataKeys          []string                  `yaml:"required_metadata_keys"`
+	UpstreamNonStreamTimeout      string                    `yaml:"upstream_non_stream_timeout"`
+	UpstreamDialTimeout           string                    `yaml:"upstream_dial_timeout"`
+	UpstreamKeepAlive             string                    `yaml:"upstream_keep_alive_timeout"`
+	UpstreamTLSHandshakeTimeout   string                    `yaml:"upstream_tls_handshake_timeout"`
+	UpstreamResponseHeaderTimeout string                    `yaml:"upstream_response_header_timeout"`
+	UpstreamExpectContinueTimeout string                    `yaml:"upstream_expect_continue_timeout"`
+	UpstreamIdleConnTimeout       string                    `yaml:"upstream_idle_conn_timeout"`
 }
 
 type yamlPassThroughEndpoint struct {
@@ -164,12 +187,23 @@ func LoadConfig() *Config {
 	cfg := &Config{
 		Port:              8080,
 		LogFile:           "gollmproxy.log",
-		LogRequestBody:    true,
-		LogResponseBody:   true,
-		OpenAIBaseURL:     "https://api.openai.com",
-		GeminiBaseURL:     "https://generativelanguage.googleapis.com",
-		TavilyBaseURL:     "https://api.tavily.com",
-		OpenRouterBaseURL: "https://openrouter.ai/api",
+		ServerReadTimeout: 30 * time.Second,
+		// streaming responses may legitimately stay open longer than any fixed write deadline
+		ServerWriteTimeout:            0,
+		ServerIdleTimeout:             2 * time.Minute,
+		LogRequestBody:                true,
+		LogResponseBody:               true,
+		OpenAIBaseURL:                 "https://api.openai.com",
+		GeminiBaseURL:                 "https://generativelanguage.googleapis.com",
+		TavilyBaseURL:                 "https://api.tavily.com",
+		OpenRouterBaseURL:             "https://openrouter.ai/api",
+		UpstreamNonStreamTimeout:      defaultUpstreamNonStreamTimeout,
+		UpstreamDialTimeout:           defaultUpstreamDialTimeout,
+		UpstreamKeepAlive:             defaultUpstreamKeepAlive,
+		UpstreamTLSHandshakeTimeout:   defaultUpstreamTLSHandshakeTimeout,
+		UpstreamResponseHeaderTimeout: defaultUpstreamResponseHeaderTimeout,
+		UpstreamExpectContinueTimeout: defaultUpstreamExpectContinueTimeout,
+		UpstreamIdleConnTimeout:       defaultUpstreamIdleConnTimeout,
 	}
 
 	flag.StringVar(&configFile, "config", "", "config file path (YAML)")
@@ -269,6 +303,9 @@ func loadYAMLConfig(path string, cfg *Config) {
 	if lc.GeneralSettings.LogFile != "" {
 		cfg.LogFile = lc.GeneralSettings.LogFile
 	}
+	applyDurationSetting("server_read_timeout", lc.GeneralSettings.ServerReadTimeout, &cfg.ServerReadTimeout)
+	applyDurationSetting("server_write_timeout", lc.GeneralSettings.ServerWriteTimeout, &cfg.ServerWriteTimeout)
+	applyDurationSetting("server_idle_timeout", lc.GeneralSettings.ServerIdleTimeout, &cfg.ServerIdleTimeout)
 	if v := resolveEnvRef(lc.GeneralSettings.MasterKey); v != "" {
 		cfg.MasterKey = v
 	}
@@ -318,6 +355,13 @@ func loadYAMLConfig(path string, cfg *Config) {
 	if len(lc.GeneralSettings.RequiredMetadataKeys) > 0 {
 		cfg.RequiredMetadataKeys = lc.GeneralSettings.RequiredMetadataKeys
 	}
+	applyDurationSetting("upstream_non_stream_timeout", lc.GeneralSettings.UpstreamNonStreamTimeout, &cfg.UpstreamNonStreamTimeout)
+	applyDurationSetting("upstream_dial_timeout", lc.GeneralSettings.UpstreamDialTimeout, &cfg.UpstreamDialTimeout)
+	applyDurationSetting("upstream_keep_alive_timeout", lc.GeneralSettings.UpstreamKeepAlive, &cfg.UpstreamKeepAlive)
+	applyDurationSetting("upstream_tls_handshake_timeout", lc.GeneralSettings.UpstreamTLSHandshakeTimeout, &cfg.UpstreamTLSHandshakeTimeout)
+	applyDurationSetting("upstream_response_header_timeout", lc.GeneralSettings.UpstreamResponseHeaderTimeout, &cfg.UpstreamResponseHeaderTimeout)
+	applyDurationSetting("upstream_expect_continue_timeout", lc.GeneralSettings.UpstreamExpectContinueTimeout, &cfg.UpstreamExpectContinueTimeout)
+	applyDurationSetting("upstream_idle_conn_timeout", lc.GeneralSettings.UpstreamIdleConnTimeout, &cfg.UpstreamIdleConnTimeout)
 
 	// Load pass-through endpoints
 	for _, ep := range lc.GeneralSettings.PassThroughEndpoints {
@@ -431,6 +475,18 @@ func loadYAMLConfig(path string, cfg *Config) {
 			}
 		}
 	}
+}
+
+func applyDurationSetting(name, value string, dst *time.Duration) {
+	if value == "" {
+		return
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		slog.Warn("invalid duration in config, keeping current/default value", "name", name, "value", value, "error", err)
+		return
+	}
+	*dst = d
 }
 
 // buildPostgresDSNFromEnv constructs a key=value connection string from the

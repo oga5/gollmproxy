@@ -76,6 +76,82 @@ func TestHTTPClientUsesTransportTimeoutsForStreamingSafety(t *testing.T) {
 	}
 }
 
+func TestConfigureUpstreamTimeoutsAppliesConfig(t *testing.T) {
+	oldNonStream := upstreamNonStreamTimeout
+	oldDial := upstreamDialTimeout
+	oldKeepAlive := upstreamKeepAlive
+	oldTLS := upstreamTLSHandshakeTimeout
+	oldHeader := upstreamResponseHeaderTimeout
+	oldExpect := upstreamExpectContinueTimeout
+	oldIdle := upstreamIdleConnTimeout
+	defer func() {
+		upstreamNonStreamTimeout = oldNonStream
+		upstreamDialTimeout = oldDial
+		upstreamKeepAlive = oldKeepAlive
+		upstreamTLSHandshakeTimeout = oldTLS
+		upstreamResponseHeaderTimeout = oldHeader
+		upstreamExpectContinueTimeout = oldExpect
+		upstreamIdleConnTimeout = oldIdle
+		httpClient.Transport = newUpstreamTransport()
+	}()
+
+	cfg := &Config{
+		UpstreamNonStreamTimeout:      42 * time.Second,
+		UpstreamDialTimeout:           2 * time.Second,
+		UpstreamKeepAlive:             11 * time.Second,
+		UpstreamTLSHandshakeTimeout:   3 * time.Second,
+		UpstreamResponseHeaderTimeout: 4 * time.Second,
+		UpstreamExpectContinueTimeout: 5 * time.Second,
+		UpstreamIdleConnTimeout:       6 * time.Second,
+	}
+
+	configureUpstreamTimeouts(cfg)
+
+	if upstreamNonStreamTimeout != cfg.UpstreamNonStreamTimeout {
+		t.Fatalf("unexpected upstreamNonStreamTimeout: got %v want %v", upstreamNonStreamTimeout, cfg.UpstreamNonStreamTimeout)
+	}
+
+	transport, ok := httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("httpClient.Transport has unexpected type %T", httpClient.Transport)
+	}
+	if transport.ResponseHeaderTimeout != cfg.UpstreamResponseHeaderTimeout {
+		t.Fatalf("unexpected ResponseHeaderTimeout: got %v want %v", transport.ResponseHeaderTimeout, cfg.UpstreamResponseHeaderTimeout)
+	}
+	if transport.TLSHandshakeTimeout != cfg.UpstreamTLSHandshakeTimeout {
+		t.Fatalf("unexpected TLSHandshakeTimeout: got %v want %v", transport.TLSHandshakeTimeout, cfg.UpstreamTLSHandshakeTimeout)
+	}
+	if transport.ExpectContinueTimeout != cfg.UpstreamExpectContinueTimeout {
+		t.Fatalf("unexpected ExpectContinueTimeout: got %v want %v", transport.ExpectContinueTimeout, cfg.UpstreamExpectContinueTimeout)
+	}
+	if transport.IdleConnTimeout != cfg.UpstreamIdleConnTimeout {
+		t.Fatalf("unexpected IdleConnTimeout: got %v want %v", transport.IdleConnTimeout, cfg.UpstreamIdleConnTimeout)
+	}
+}
+
+func TestFallbackPositiveDuration(t *testing.T) {
+	defaultValue := 10 * time.Second
+
+	tests := []struct {
+		name  string
+		value time.Duration
+		want  time.Duration
+	}{
+		{name: "positive value", value: 3 * time.Second, want: 3 * time.Second},
+		{name: "zero value", value: 0, want: defaultValue},
+		{name: "negative value", value: -1 * time.Second, want: defaultValue},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := fallbackPositiveDuration(tt.value, defaultValue)
+			if got != tt.want {
+				t.Fatalf("unexpected duration: got %v want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRedactSensitiveURLRedactsKnownKeys(t *testing.T) {
 	rawURL := "https://example.com/v1beta/models/test:generateContent?alt=sse&key=secret&token=abc&keep=ok"
 

@@ -58,8 +58,18 @@ environment_variables:
 general_settings:
   port: 8080
   log_file: "gollmproxy.log"
+  server_read_timeout: 30s
+  server_write_timeout: 0s # ストリーミング用途では 0s (無制限) 推奨
+  server_idle_timeout: 2m
   log_request_body: true
   log_response_body: true
+  upstream_non_stream_timeout: 5m
+  upstream_dial_timeout: 10s
+  upstream_keep_alive_timeout: 30s
+  upstream_tls_handshake_timeout: 10s
+  upstream_response_header_timeout: 30s
+  upstream_expect_continue_timeout: 1s
+  upstream_idle_conn_timeout: 90s
   token_budget_enabled: false
   bedrock_include_reasoning: false
   # required_metadata_keys:

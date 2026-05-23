@@ -19,20 +19,34 @@ const maxPassthroughRequestSize = 10 << 20 // 10MB
 var errResponseBodyTooLarge = errors.New("upstream response body too large")
 
 const (
-	upstreamNonStreamTimeout      = 5 * time.Minute
-	upstreamDialTimeout           = 10 * time.Second
-	upstreamKeepAlive             = 30 * time.Second
-	upstreamTLSHandshakeTimeout   = 10 * time.Second
-	upstreamResponseHeaderTimeout = 30 * time.Second
-	upstreamExpectContinueTimeout = 1 * time.Second
-	upstreamIdleConnTimeout       = 90 * time.Second
+	defaultUpstreamNonStreamTimeout      = 5 * time.Minute
+	defaultUpstreamDialTimeout           = 10 * time.Second
+	defaultUpstreamKeepAlive             = 30 * time.Second
+	defaultUpstreamTLSHandshakeTimeout   = 10 * time.Second
+	defaultUpstreamResponseHeaderTimeout = 30 * time.Second
+	defaultUpstreamExpectContinueTimeout = 1 * time.Second
+	defaultUpstreamIdleConnTimeout       = 90 * time.Second
+)
+
+var (
+	upstreamNonStreamTimeout      = defaultUpstreamNonStreamTimeout
+	upstreamDialTimeout           = defaultUpstreamDialTimeout
+	upstreamKeepAlive             = defaultUpstreamKeepAlive
+	upstreamTLSHandshakeTimeout   = defaultUpstreamTLSHandshakeTimeout
+	upstreamResponseHeaderTimeout = defaultUpstreamResponseHeaderTimeout
+	upstreamExpectContinueTimeout = defaultUpstreamExpectContinueTimeout
+	upstreamIdleConnTimeout       = defaultUpstreamIdleConnTimeout
 )
 
 // httpClient is used for all upstream requests.
 // Streaming responses must not be bounded by an absolute client timeout because
 // http.Client.Timeout includes the full response body read.
 var httpClient = &http.Client{
-	Transport: &http.Transport{
+	Transport: newUpstreamTransport(),
+}
+
+func newUpstreamTransport() *http.Transport {
+	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   upstreamDialTimeout,
@@ -44,7 +58,31 @@ var httpClient = &http.Client{
 		TLSHandshakeTimeout:   upstreamTLSHandshakeTimeout,
 		ExpectContinueTimeout: upstreamExpectContinueTimeout,
 		ResponseHeaderTimeout: upstreamResponseHeaderTimeout,
-	},
+	}
+}
+
+func configureUpstreamTimeouts(cfg *Config) {
+	upstreamNonStreamTimeout = fallbackPositiveDuration(cfg.UpstreamNonStreamTimeout, defaultUpstreamNonStreamTimeout)
+	upstreamDialTimeout = fallbackPositiveDuration(cfg.UpstreamDialTimeout, defaultUpstreamDialTimeout)
+	upstreamKeepAlive = fallbackPositiveDuration(cfg.UpstreamKeepAlive, defaultUpstreamKeepAlive)
+	upstreamTLSHandshakeTimeout = fallbackPositiveDuration(cfg.UpstreamTLSHandshakeTimeout, defaultUpstreamTLSHandshakeTimeout)
+	upstreamResponseHeaderTimeout = fallbackPositiveDuration(cfg.UpstreamResponseHeaderTimeout, defaultUpstreamResponseHeaderTimeout)
+	upstreamExpectContinueTimeout = fallbackPositiveDuration(cfg.UpstreamExpectContinueTimeout, defaultUpstreamExpectContinueTimeout)
+	upstreamIdleConnTimeout = fallbackPositiveDuration(cfg.UpstreamIdleConnTimeout, defaultUpstreamIdleConnTimeout)
+
+	if oldTransport, ok := httpClient.Transport.(*http.Transport); ok {
+		// Drop idle pooled connections created with the previous timeout settings
+		// before swapping in a newly configured transport.
+		oldTransport.CloseIdleConnections()
+	}
+	httpClient.Transport = newUpstreamTransport()
+}
+
+func fallbackPositiveDuration(value, defaultValue time.Duration) time.Duration {
+	if value <= 0 {
+		return defaultValue
+	}
+	return value
 }
 
 func withUpstreamTimeout(parent context.Context, enable bool) (context.Context, context.CancelFunc) {
