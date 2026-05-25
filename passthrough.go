@@ -59,7 +59,7 @@ func handleOpenAIPassthrough(cfg *Config) http.HandlerFunc {
 		})
 		if err != nil {
 			slog.Error("passthrough error", "provider", "openai", "error", sanitizeUpstreamError(err))
-			writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
+			writeErrorJSON(w, upstreamErrorStatusCode(err), "upstream connection failed", "server_error")
 		}
 	}
 }
@@ -128,7 +128,7 @@ func handleGeminiPassthrough(cfg *Config, logger *RequestLogger) http.HandlerFun
 		resp, err := httpClient.Do(upstreamReq)
 		if err != nil {
 			slog.Error("passthrough error", "provider", "gemini", "error", sanitizeUpstreamError(err))
-			writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
+			writeErrorJSON(w, upstreamErrorStatusCode(err), "upstream connection failed", "server_error")
 			return
 		}
 		defer resp.Body.Close()
@@ -263,7 +263,7 @@ func handleOpenRouterPassthrough(cfg *Config) http.HandlerFunc {
 		})
 		if err != nil {
 			slog.Error("passthrough error", "provider", "openrouter", "error", sanitizeUpstreamError(err))
-			writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
+			writeErrorJSON(w, upstreamErrorStatusCode(err), "upstream connection failed", "server_error")
 		}
 	}
 }
@@ -292,7 +292,7 @@ func handleTavilyPassthrough(cfg *Config) http.HandlerFunc {
 		})
 		if err != nil {
 			slog.Error("passthrough error", "provider", "tavily", "error", sanitizeUpstreamError(err))
-			writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
+			writeErrorJSON(w, upstreamErrorStatusCode(err), "upstream connection failed", "server_error")
 		}
 	}
 }
@@ -368,7 +368,7 @@ func handleConfiguredPassthrough(cfg *Config, ep PassThroughEndpoint) http.Handl
 		})
 		if err != nil {
 			slog.Error("passthrough error", "endpoint", ep.Path, "error", sanitizeUpstreamError(err))
-			writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
+			writeErrorJSON(w, upstreamErrorStatusCode(err), "upstream connection failed", "server_error")
 		}
 	}
 }

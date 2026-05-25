@@ -18,6 +18,10 @@ const maxPassthroughRequestSize = 10 << 20 // 10MB
 
 var errResponseBodyTooLarge = errors.New("upstream response body too large")
 
+// statusUpstreamUnavailable is returned when upstream did not provide an HTTP
+// response status (e.g. dial/timeout/transport failure).
+const statusUpstreamUnavailable = 599
+
 const (
 	defaultUpstreamNonStreamTimeout      = 5 * time.Minute
 	defaultUpstreamDialTimeout           = 10 * time.Second
@@ -215,6 +219,13 @@ func sanitizeUpstreamError(err error) string {
 	}
 
 	return err.Error()
+}
+
+func upstreamErrorStatusCode(err error) int {
+	if err == nil {
+		return http.StatusBadGateway
+	}
+	return statusUpstreamUnavailable
 }
 
 func redactSensitiveURL(rawURL string) string {

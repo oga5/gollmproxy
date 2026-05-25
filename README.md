@@ -324,7 +324,7 @@ tail -f gollmproxy.log | jq .
 | `model` | 使用モデル名 |
 | `provider` | バックエンドプロバイダ (openai, gemini, bedrock など) |
 | `stream` | ストリーミングリクエストかどうか |
-| `status_code` | レスポンスステータスコード |
+| `status_code` | レスポンスステータスコード（upstreamからHTTPステータス未取得時は `599`） |
 | `latency_ms` | レイテンシ (ミリ秒) |
 | `prompt_tokens` | プロンプトトークン数 |
 | `completion_tokens` | 生成トークン数 |

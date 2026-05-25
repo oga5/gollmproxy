@@ -72,7 +72,7 @@ func handleBedrockOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Co
 	resp, err := httpClient.Do(upstreamReq)
 	if err != nil {
 		slog.Error("bedrock openai upstream error", "request_id", reqID, "error", sanitizeUpstreamError(err))
-		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
+		writeErrorJSON(w, upstreamErrorStatusCode(err), "upstream connection failed", "server_error")
 		return
 	}
 	defer resp.Body.Close()
