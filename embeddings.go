@@ -31,7 +31,7 @@ func forwardOpenAICompatEmbeddings(w http.ResponseWriter, r *http.Request, cfg *
 	resp, err := httpClient.Do(upstreamReq)
 	if err != nil {
 		slog.Error(providerLabel+" embeddings upstream error", "request_id", reqID, "error", sanitizeUpstreamError(err))
-		writeErrorJSON(w, upstreamErrorStatusCode(), "upstream connection failed", "server_error")
+		writeErrorJSON(w, statusUpstreamUnavailable, "upstream connection failed", "server_error")
 		return
 	}
 	defer resp.Body.Close()
@@ -195,7 +195,7 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 		resp, err := httpClient.Do(upstreamReq)
 		if err != nil {
 			slog.Error("gemini embeddings upstream error", "request_id", reqID, "error", sanitizeUpstreamError(err))
-			writeErrorJSON(w, upstreamErrorStatusCode(), "upstream connection failed", "server_error")
+			writeErrorJSON(w, statusUpstreamUnavailable, "upstream connection failed", "server_error")
 			return
 		}
 		defer resp.Body.Close()
@@ -263,7 +263,7 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 		resp, err := httpClient.Do(upstreamReq)
 		if err != nil {
 			slog.Error("gemini batch embeddings upstream error", "request_id", reqID, "error", sanitizeUpstreamError(err))
-			writeErrorJSON(w, upstreamErrorStatusCode(), "upstream connection failed", "server_error")
+			writeErrorJSON(w, statusUpstreamUnavailable, "upstream connection failed", "server_error")
 			return
 		}
 		defer resp.Body.Close()

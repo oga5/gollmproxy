@@ -59,7 +59,7 @@ func handleOpenAIPassthrough(cfg *Config) http.HandlerFunc {
 		})
 		if err != nil {
 			slog.Error("passthrough error", "provider", "openai", "error", sanitizeUpstreamError(err))
-			writeErrorJSON(w, upstreamErrorStatusCode(), "upstream connection failed", "server_error")
+			writeErrorJSON(w, statusUpstreamUnavailable, "upstream connection failed", "server_error")
 			return
 		}
 	}
@@ -129,7 +129,7 @@ func handleGeminiPassthrough(cfg *Config, logger *RequestLogger) http.HandlerFun
 		resp, err := httpClient.Do(upstreamReq)
 		if err != nil {
 			slog.Error("passthrough error", "provider", "gemini", "error", sanitizeUpstreamError(err))
-			writeErrorJSON(w, upstreamErrorStatusCode(), "upstream connection failed", "server_error")
+			writeErrorJSON(w, statusUpstreamUnavailable, "upstream connection failed", "server_error")
 			return
 		}
 		defer resp.Body.Close()
@@ -264,7 +264,7 @@ func handleOpenRouterPassthrough(cfg *Config) http.HandlerFunc {
 		})
 		if err != nil {
 			slog.Error("passthrough error", "provider", "openrouter", "error", sanitizeUpstreamError(err))
-			writeErrorJSON(w, upstreamErrorStatusCode(), "upstream connection failed", "server_error")
+			writeErrorJSON(w, statusUpstreamUnavailable, "upstream connection failed", "server_error")
 			return
 		}
 	}
@@ -294,7 +294,7 @@ func handleTavilyPassthrough(cfg *Config) http.HandlerFunc {
 		})
 		if err != nil {
 			slog.Error("passthrough error", "provider", "tavily", "error", sanitizeUpstreamError(err))
-			writeErrorJSON(w, upstreamErrorStatusCode(), "upstream connection failed", "server_error")
+			writeErrorJSON(w, statusUpstreamUnavailable, "upstream connection failed", "server_error")
 			return
 		}
 	}
@@ -371,7 +371,7 @@ func handleConfiguredPassthrough(cfg *Config, ep PassThroughEndpoint) http.Handl
 		})
 		if err != nil {
 			slog.Error("passthrough error", "endpoint", ep.Path, "error", sanitizeUpstreamError(err))
-			writeErrorJSON(w, upstreamErrorStatusCode(), "upstream connection failed", "server_error")
+			writeErrorJSON(w, statusUpstreamUnavailable, "upstream connection failed", "server_error")
 			return
 		}
 	}

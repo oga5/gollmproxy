@@ -221,10 +221,6 @@ func sanitizeUpstreamError(err error) string {
 	return err.Error()
 }
 
-func upstreamErrorStatusCode() int {
-	return statusUpstreamUnavailable
-}
-
 func redactSensitiveURL(rawURL string) string {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
