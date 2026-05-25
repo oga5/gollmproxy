@@ -82,11 +82,12 @@ type Config struct {
 
 // ModelConfig holds per-model configuration overrides.
 type ModelConfig struct {
-	APIKey         string
-	APIBase        string
-	Region         string
-	SearchProvider string
-	ExtraParams    map[string]interface{}
+	APIKey                   string
+	APIBase                  string
+	Region                   string
+	SearchProvider           string
+	UpstreamNonStreamTimeout time.Duration
+	ExtraParams              map[string]interface{}
 }
 
 // PassThroughEndpoint defines a custom pass-through proxy endpoint.
@@ -122,6 +123,7 @@ type modelParams struct {
 	APIBase        string                 `yaml:"api_base"`
 	Region         string                 `yaml:"region"`
 	SearchProvider string                 `yaml:"search_provider"`
+	Timeout        string                 `yaml:"timeout"`
 	AwsRegionName  string                 `yaml:"aws_region_name"`
 	ExtraParams    map[string]interface{} `yaml:"extra_params"`
 }
@@ -417,6 +419,7 @@ func loadYAMLConfig(path string, cfg *Config) {
 		if v := resolveEnvRef(entry.Params.AwsRegionName); v != "" {
 			region = v
 		}
+		timeoutRaw := resolveEnvRef(entry.Params.Timeout)
 
 		// Register model_name -> provider-prefixed model alias
 		if entry.ModelName != "" && model != "" {
@@ -437,13 +440,27 @@ func loadYAMLConfig(path string, cfg *Config) {
 		if entry.ModelName != "" {
 			configKey = entry.ModelName
 		}
-		if configKey != "" && (apiKey != "" || apiBase != "" || region != "" || searchProvider != "" || len(entry.Params.ExtraParams) > 0) {
+
+		var timeout time.Duration
+		if timeoutRaw != "" {
+			d, err := time.ParseDuration(timeoutRaw)
+			if err != nil {
+				slog.Warn("invalid model timeout in config, ignoring", "model_name", entry.ModelName, "model", model, "value", timeoutRaw, "error", err)
+			} else if d > 0 {
+				timeout = d
+			} else {
+				slog.Warn("non-positive model timeout in config, ignoring", "model_name", entry.ModelName, "model", model, "value", timeoutRaw)
+			}
+		}
+
+		if configKey != "" && (apiKey != "" || apiBase != "" || region != "" || searchProvider != "" || timeout > 0 || len(entry.Params.ExtraParams) > 0) {
 			cfg.ModelConfigs[configKey] = ModelConfig{
-				APIKey:         apiKey,
-				APIBase:        apiBase,
-				Region:         region,
-				SearchProvider: searchProvider,
-				ExtraParams:    entry.Params.ExtraParams,
+				APIKey:                   apiKey,
+				APIBase:                  apiBase,
+				Region:                   region,
+				SearchProvider:           searchProvider,
+				UpstreamNonStreamTimeout: timeout,
+				ExtraParams:              entry.Params.ExtraParams,
 			}
 		}
 

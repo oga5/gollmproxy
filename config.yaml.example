@@ -10,6 +10,7 @@ model_list:
     litellm_params:
       model: openai/gpt-4o
       api_key: os.environ/OPENAI_API_KEY
+      timeout: 30s # 非ストリーミング時のみ。未指定なら general_settings.upstream_non_stream_timeout
       extra_params:
         service_tier: flex
   - model_name: gemini-flash

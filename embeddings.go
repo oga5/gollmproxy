@@ -14,8 +14,8 @@ func registerEmbeddingsRoute(mux *http.ServeMux, cfg *Config, logger *RequestLog
 	mux.HandleFunc("POST /v1/embeddings", handleEmbeddings(cfg, logger))
 }
 
-func forwardOpenAICompatEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIEmbeddingRequest, provider, providerLabel, model, targetURL, authHeader string, bodyBytes, upstreamBody []byte, reqID string, start time.Time) {
-	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), true)
+func forwardOpenAICompatEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIEmbeddingRequest, provider, providerLabel, model, targetURL, authHeader string, bodyBytes, upstreamBody []byte, reqID string, start time.Time, perModelTimeout time.Duration) {
+	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), true, perModelTimeout)
 	defer cancel()
 
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, "POST", targetURL, bytes.NewReader(upstreamBody))
@@ -137,7 +137,7 @@ func handleOpenAIEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 	}
 	targetURL := baseURL + "/v1/embeddings"
 
-	forwardOpenAICompatEmbeddings(w, r, cfg, logger, req, "openai", "openai", model, targetURL, "Bearer "+apiKey, bodyBytes, modifiedBody, reqID, start)
+	forwardOpenAICompatEmbeddings(w, r, cfg, logger, req, "openai", "openai", model, targetURL, "Bearer "+apiKey, bodyBytes, modifiedBody, reqID, start, perModelCfg.UpstreamNonStreamTimeout)
 }
 
 // handleGeminiEmbeddings converts OpenAI embedding request to Gemini format and back.
@@ -181,7 +181,7 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 			return
 		}
 
-		upstreamCtx, cancel := withUpstreamTimeout(r.Context(), true)
+		upstreamCtx, cancel := withUpstreamTimeout(r.Context(), true, perModelCfg.UpstreamNonStreamTimeout)
 		defer cancel()
 
 		upstreamReq, err := http.NewRequestWithContext(upstreamCtx, "POST", targetURL, bytes.NewReader(geminiBody))
@@ -249,7 +249,7 @@ func handleGeminiEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 			return
 		}
 
-		upstreamCtx, cancel := withUpstreamTimeout(r.Context(), true)
+		upstreamCtx, cancel := withUpstreamTimeout(r.Context(), true, perModelCfg.UpstreamNonStreamTimeout)
 		defer cancel()
 
 		upstreamReq, err := http.NewRequestWithContext(upstreamCtx, "POST", targetURL, bytes.NewReader(geminiBody))
@@ -313,7 +313,7 @@ func handleOllamaEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Config,
 	if apiKey := perModelCfg.APIKey; apiKey != "" {
 		authHeader = "Bearer " + apiKey
 	}
-	forwardOpenAICompatEmbeddings(w, r, cfg, logger, req, "ollama_chat", "ollama", model, targetURL, authHeader, bodyBytes, modifiedBody, reqID, start)
+	forwardOpenAICompatEmbeddings(w, r, cfg, logger, req, "ollama_chat", "ollama", model, targetURL, authHeader, bodyBytes, modifiedBody, reqID, start, perModelCfg.UpstreamNonStreamTimeout)
 }
 
 // handleOpenRouterEmbeddings forwards embedding request to OpenRouter.
@@ -335,7 +335,7 @@ func handleOpenRouterEmbeddings(w http.ResponseWriter, r *http.Request, cfg *Con
 	}
 	targetURL := baseURL + "/v1/embeddings"
 
-	forwardOpenAICompatEmbeddings(w, r, cfg, logger, req, "openrouter", "openrouter", model, targetURL, "Bearer "+apiKey, bodyBytes, modifiedBody, reqID, start)
+	forwardOpenAICompatEmbeddings(w, r, cfg, logger, req, "openrouter", "openrouter", model, targetURL, "Bearer "+apiKey, bodyBytes, modifiedBody, reqID, start, perModelCfg.UpstreamNonStreamTimeout)
 }
 
 // normalizeEmbeddingInput converts the input field (string or []string) to []string.

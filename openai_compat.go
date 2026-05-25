@@ -139,8 +139,8 @@ func parseModelPrefix(model string) (provider, modelName string) {
 	return "openai", model
 }
 
-func forwardOpenAICompatChat(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, provider, providerLabel, logModelName, targetURL, authHeader string, metadata map[string]any, bodyBytes, upstreamBody []byte, reqID string, start time.Time) {
-	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream)
+func forwardOpenAICompatChat(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, provider, providerLabel, logModelName, targetURL, authHeader string, metadata map[string]any, bodyBytes, upstreamBody []byte, reqID string, start time.Time, perModelTimeout time.Duration) {
+	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream, perModelTimeout)
 	defer cancel()
 
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, "POST", targetURL, bytes.NewReader(upstreamBody))
@@ -227,7 +227,7 @@ func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 	}
 	targetURL := baseURL + "/v1/chat/completions"
 
-	forwardOpenAICompatChat(w, r, cfg, logger, req, "openai", "openai", logModelName, targetURL, "Bearer "+apiKey, metadata, bodyBytes, modifiedBody, reqID, start)
+	forwardOpenAICompatChat(w, r, cfg, logger, req, "openai", "openai", logModelName, targetURL, "Bearer "+apiKey, metadata, bodyBytes, modifiedBody, reqID, start, perModelCfg.UpstreamNonStreamTimeout)
 }
 
 // rewriteModelField replaces the model field value in the JSON body.
@@ -282,7 +282,7 @@ func handleOllamaChatProvider(w http.ResponseWriter, r *http.Request, cfg *Confi
 	if apiKey := perModelCfg.APIKey; apiKey != "" {
 		authHeader = "Bearer " + apiKey
 	}
-	forwardOpenAICompatChat(w, r, cfg, logger, req, "ollama_chat", "ollama", logModelName, targetURL, authHeader, metadata, bodyBytes, modifiedBody, reqID, start)
+	forwardOpenAICompatChat(w, r, cfg, logger, req, "ollama_chat", "ollama", logModelName, targetURL, authHeader, metadata, bodyBytes, modifiedBody, reqID, start, perModelCfg.UpstreamNonStreamTimeout)
 }
 
 func handleOpenRouterProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model, logModelName string, metadata map[string]any, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
@@ -304,7 +304,7 @@ func handleOpenRouterProvider(w http.ResponseWriter, r *http.Request, cfg *Confi
 	}
 	targetURL := baseURL + "/v1/chat/completions"
 
-	forwardOpenAICompatChat(w, r, cfg, logger, req, "openrouter", "openrouter", logModelName, targetURL, "Bearer "+apiKey, metadata, bodyBytes, modifiedBody, reqID, start)
+	forwardOpenAICompatChat(w, r, cfg, logger, req, "openrouter", "openrouter", logModelName, targetURL, "Bearer "+apiKey, metadata, bodyBytes, modifiedBody, reqID, start, perModelCfg.UpstreamNonStreamTimeout)
 }
 
 func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model, logModelName string, metadata map[string]any, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
@@ -344,7 +344,7 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 		return
 	}
 
-	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream)
+	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream, perModelCfg.UpstreamNonStreamTimeout)
 	defer cancel()
 
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, "POST", targetURL, bytes.NewReader(geminiBody))

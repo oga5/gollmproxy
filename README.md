@@ -199,6 +199,7 @@ model_list:
       model: openai/gpt-4o
       api_key: os.environ/OPENAI_API_KEY
       api_base: https://api.openai.com
+      timeout: 30s
   - model_name: gemini-flash
     litellm_params:
       model: gemini/gemini-2.5-flash
@@ -240,6 +241,7 @@ environment_variables:
   - `bedrock_include_reasoning`: Bedrock 応答中の `<reasoning>...</reasoning>` をそのまま返すか。未設定時は `false`
   - `required_metadata_keys`: `/v1/chat/completions` の `metadata` フィールドで必須とするキーのリスト。指定したキーが存在しないまたは空の場合は HTTP 400 を返す
 - `model_list`: `litellm_params.model` のプレフィックス (`openai/`, `gemini/`, `bedrock/`, `bedrock_openai/`) でプロバイダ判定
+- `model_list.litellm_params.timeout`: 非ストリーミング上流リクエストのモデル個別タイムアウト（Goのduration形式）。設定時は `general_settings.upstream_non_stream_timeout` より優先
 - Bedrock 利用時 (`bedrock/`, `bedrock_openai/` 共通) は `litellm_params.region` を優先し、未指定なら `AWS_REGION` または `AWS_DEFAULT_REGION` を利用。`bedrock_openai/` は `api_base` でエンドポイントURLを上書き可能
 - `model_name` がある場合の個別設定は `model_name` 単位で保持されるため、同じ `litellm_params.model` を複数の別名で使っても `region` や `api_base` は上書きされない
 - PostgreSQL ログの `model_name` 列と token budget 判定には、`model_list.model_name` で指定した値（またはクライアントが直接指定した `model` 値）が使われる

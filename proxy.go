@@ -89,11 +89,15 @@ func fallbackPositiveDuration(value, defaultValue time.Duration) time.Duration {
 	return value
 }
 
-func withUpstreamTimeout(parent context.Context, enable bool) (context.Context, context.CancelFunc) {
+func withUpstreamTimeout(parent context.Context, enable bool, perModelTimeout time.Duration) (context.Context, context.CancelFunc) {
 	if !enable {
 		return parent, func() {}
 	}
-	return context.WithTimeout(parent, upstreamNonStreamTimeout)
+	timeout := upstreamNonStreamTimeout
+	if perModelTimeout > 0 {
+		timeout = perModelTimeout
+	}
+	return context.WithTimeout(parent, timeout)
 }
 
 func readUpstreamBody(body io.Reader, maxSize int64) ([]byte, error) {
