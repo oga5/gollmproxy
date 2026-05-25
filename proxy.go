@@ -221,11 +221,8 @@ func sanitizeUpstreamError(err error) string {
 	return err.Error()
 }
 
-func upstreamErrorStatusCode(err error) int {
-	if err != nil {
-		return statusUpstreamUnavailable
-	}
-	return http.StatusBadGateway
+func upstreamErrorStatusCode() int {
+	return statusUpstreamUnavailable
 }
 
 func redactSensitiveURL(rawURL string) string {
