@@ -156,7 +156,7 @@ func forwardOpenAICompatChat(w http.ResponseWriter, r *http.Request, cfg *Config
 	resp, err := httpClient.Do(upstreamReq)
 	if err != nil {
 		slog.Error(providerLabel+" upstream error", "request_id", reqID, "error", sanitizeUpstreamError(err))
-		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
+		writeErrorJSON(w, statusUpstreamUnavailable, "upstream connection failed", "server_error")
 		return
 	}
 	defer resp.Body.Close()
@@ -358,7 +358,7 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 	resp, err := httpClient.Do(upstreamReq)
 	if err != nil {
 		slog.Error("gemini upstream error", "request_id", reqID, "error", sanitizeUpstreamError(err))
-		writeErrorJSON(w, http.StatusBadGateway, "upstream connection failed", "server_error")
+		writeErrorJSON(w, statusUpstreamUnavailable, "upstream connection failed", "server_error")
 		return
 	}
 	defer resp.Body.Close()
