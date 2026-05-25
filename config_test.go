@@ -80,32 +80,32 @@ func TestLoadYAMLConfigStoresSearchProviderInModelConfig(t *testing.T) {
 		t.Fatalf("failed to write temp config: %v", err)
 	}
 
-	func TestLoadYAMLConfigStoresPerModelTimeout(t *testing.T) {
-		dir := t.TempDir()
-		configPath := filepath.Join(dir, "config.yaml")
-		configBody := []byte(`model_list:
-	  - model_name: gpt-4o-fast
-	    litellm_params:
-	      model: openai/gpt-4o
-	      timeout: 30s
-	`)
-		if err := os.WriteFile(configPath, configBody, 0644); err != nil {
-			t.Fatalf("failed to write temp config: %v", err)
-		}
-
-		cfg := &Config{}
-		loadYAMLConfig(configPath, cfg)
-
-		if got := cfg.ModelConfigs["gpt-4o-fast"].UpstreamNonStreamTimeout; got != 30*time.Second {
-			t.Fatalf("unexpected per-model timeout: got %v want %v", got, 30*time.Second)
-		}
-	}
-
 	cfg := &Config{}
 	loadYAMLConfig(configPath, cfg)
 
 	if got := cfg.ModelConfigs["tavily-proxy"].SearchProvider; got != "tavily" {
 		t.Fatalf("unexpected search_provider: %q", got)
+	}
+}
+
+func TestLoadYAMLConfigStoresPerModelTimeout(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := []byte(`model_list:
+  - model_name: gpt-4o-fast
+    litellm_params:
+      model: openai/gpt-4o
+      timeout: 30s
+`)
+	if err := os.WriteFile(configPath, configBody, 0644); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+
+	cfg := &Config{}
+	loadYAMLConfig(configPath, cfg)
+
+	if got := cfg.ModelConfigs["gpt-4o-fast"].UpstreamNonStreamTimeout; got != 30*time.Second {
+		t.Fatalf("unexpected per-model timeout: got %v want %v", got, 30*time.Second)
 	}
 }
 

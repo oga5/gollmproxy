@@ -31,28 +31,28 @@ func TestWithUpstreamTimeoutDoesNotWrapStreamingRequests(t *testing.T) {
 	if deadline, ok := ctx.Deadline(); ok {
 		t.Fatalf("streaming request context should not have a deadline, got %v", deadline)
 	}
+}
 
-	func TestWithUpstreamTimeoutUsesPerModelTimeoutWhenProvided(t *testing.T) {
-		old := upstreamNonStreamTimeout
-		upstreamNonStreamTimeout = 5 * time.Minute
-		defer func() { upstreamNonStreamTimeout = old }()
+func TestWithUpstreamTimeoutUsesPerModelTimeoutWhenProvided(t *testing.T) {
+	old := upstreamNonStreamTimeout
+	upstreamNonStreamTimeout = 5 * time.Minute
+	defer func() { upstreamNonStreamTimeout = old }()
 
-		override := 42 * time.Second
-		ctx, cancel := withUpstreamTimeout(context.Background(), true, override)
-		defer cancel()
+	override := 42 * time.Second
+	ctx, cancel := withUpstreamTimeout(context.Background(), true, override)
+	defer cancel()
 
-		deadline, ok := ctx.Deadline()
-		if !ok {
-			t.Fatal("expected non-streaming request context to have a deadline")
-		}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("expected non-streaming request context to have a deadline")
+	}
 
-		remaining := time.Until(deadline)
-		if remaining <= 0 || remaining > override {
-			t.Fatalf("unexpected remaining timeout for override: %v", remaining)
-		}
-		if remaining > upstreamNonStreamTimeout {
-			t.Fatalf("override timeout should take precedence over global timeout: remaining=%v global=%v", remaining, upstreamNonStreamTimeout)
-		}
+	remaining := time.Until(deadline)
+	if remaining <= 0 || remaining > override {
+		t.Fatalf("unexpected remaining timeout for override: %v", remaining)
+	}
+	if remaining > upstreamNonStreamTimeout {
+		t.Fatalf("override timeout should take precedence over global timeout: remaining=%v global=%v", remaining, upstreamNonStreamTimeout)
 	}
 }
 
