@@ -24,6 +24,22 @@ func TestWithUpstreamTimeoutSetsDeadlineForNonStreamingRequests(t *testing.T) {
 	}
 }
 
+func TestWithUpstreamTimeoutUsesPerRequestOverride(t *testing.T) {
+	override := 750 * time.Millisecond
+	ctx, cancel := withUpstreamTimeout(context.Background(), true, override)
+	defer cancel()
+
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("expected deadline with override timeout")
+	}
+
+	remaining := time.Until(deadline)
+	if remaining <= 0 || remaining > override {
+		t.Fatalf("unexpected remaining timeout with override: %v", remaining)
+	}
+}
+
 func TestWithUpstreamTimeoutDoesNotWrapStreamingRequests(t *testing.T) {
 	ctx, cancel := withUpstreamTimeout(context.Background(), false)
 	defer cancel()

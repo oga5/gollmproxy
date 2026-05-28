@@ -10,6 +10,7 @@ model_list:
     litellm_params:
       model: openai/gpt-4o
       api_key: os.environ/OPENAI_API_KEY
+      timeout: 45s
       extra_params:
         service_tier: flex
   - model_name: gemini-flash
@@ -24,6 +25,7 @@ model_list:
     litellm_params:
       model: bedrock/openai.gpt-oss-20b-1:0
       region: ap-northeast-1
+      timeout: 90s
       extra_params:
         service_tier: flex
   # bedrock_openai: Bedrock の OpenAI 互換エンドポイントに SigV4 署名で転送
@@ -75,6 +77,12 @@ general_settings:
   # required_metadata_keys:
   #   - app_id
   #   - user_id
+  # log_metadata_litellm_params_whitelist:
+  #   - model
+  #   - api_base
+  #   - region
+  #   - search_provider
+  #   - service_tier
   # pass_through_endpoints:
   #   - path: /custom-api
   #     target: https://api.example.com

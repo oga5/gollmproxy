@@ -58,7 +58,7 @@ func (s *PostgresTokenBudgetStore) ensureSchema() error {
 CREATE TABLE IF NOT EXISTS token_budgets (
   app_id text NOT NULL,
   model_name text NOT NULL,
-  token_budget bigint NOT NULL CHECK (token_budget >= 0),
+	  tokens_per_day bigint NOT NULL CHECK (tokens_per_day >= 0),
   PRIMARY KEY (app_id, model_name)
 )`
 
@@ -88,7 +88,7 @@ func (s *PostgresTokenBudgetStore) CheckAllowed(ctx context.Context, appID, mode
 	}
 
 	const q = `
-SELECT b.token_budget, COALESCE(u.token, 0)
+SELECT b.tokens_per_day, COALESCE(u.token, 0)
 FROM token_budgets b
 LEFT JOIN token_usage_daily u
   ON u.app_id = b.app_id

@@ -71,6 +71,10 @@ type Config struct {
 	// in every /v1/chat/completions request. Missing keys result in a 400 error.
 	RequiredMetadataKeys []string
 
+	// LogMetadataLitellmParamsWhitelist controls which server-side litellm_params
+	// keys are written into log metadata.
+	LogMetadataLitellmParamsWhitelist []string
+
 	UpstreamNonStreamTimeout      time.Duration
 	UpstreamDialTimeout           time.Duration
 	UpstreamKeepAlive             time.Duration
@@ -87,6 +91,7 @@ type ModelConfig struct {
 	Region         string
 	SearchProvider string
 	ExtraParams    map[string]interface{}
+	Timeout        time.Duration
 }
 
 // PassThroughEndpoint defines a custom pass-through proxy endpoint.
@@ -124,6 +129,7 @@ type modelParams struct {
 	SearchProvider string                 `yaml:"search_provider"`
 	AwsRegionName  string                 `yaml:"aws_region_name"`
 	ExtraParams    map[string]interface{} `yaml:"extra_params"`
+	Timeout        string                 `yaml:"timeout"`
 }
 
 type generalSettings struct {
@@ -143,6 +149,7 @@ type generalSettings struct {
 	TokenBudgetEnabled            *bool                     `yaml:"token_budget_enabled"`
 	PassThroughEndpoints          []yamlPassThroughEndpoint `yaml:"pass_through_endpoints"`
 	RequiredMetadataKeys          []string                  `yaml:"required_metadata_keys"`
+	LogMetadataLitellmParams      []string                  `yaml:"log_metadata_litellm_params_whitelist"`
 	UpstreamNonStreamTimeout      string                    `yaml:"upstream_non_stream_timeout"`
 	UpstreamDialTimeout           string                    `yaml:"upstream_dial_timeout"`
 	UpstreamKeepAlive             string                    `yaml:"upstream_keep_alive_timeout"`
@@ -171,6 +178,14 @@ type searchToolParams struct {
 
 type passthroughAPIConfig struct {
 	APIKey string `yaml:"api_key"`
+}
+
+var defaultLogMetadataLitellmParamsWhitelist = []string{
+	"model",
+	"api_base",
+	"region",
+	"search_provider",
+	"service_tier",
 }
 
 // resolveEnvRef resolves "os.environ/VARNAME" references to environment variable values.
@@ -204,6 +219,8 @@ func LoadConfig() *Config {
 		UpstreamResponseHeaderTimeout: defaultUpstreamResponseHeaderTimeout,
 		UpstreamExpectContinueTimeout: defaultUpstreamExpectContinueTimeout,
 		UpstreamIdleConnTimeout:       defaultUpstreamIdleConnTimeout,
+		LogMetadataLitellmParamsWhitelist: append([]string(nil),
+			defaultLogMetadataLitellmParamsWhitelist...),
 	}
 
 	flag.StringVar(&configFile, "config", "", "config file path (YAML)")
@@ -355,6 +372,9 @@ func loadYAMLConfig(path string, cfg *Config) {
 	if len(lc.GeneralSettings.RequiredMetadataKeys) > 0 {
 		cfg.RequiredMetadataKeys = lc.GeneralSettings.RequiredMetadataKeys
 	}
+	if len(lc.GeneralSettings.LogMetadataLitellmParams) > 0 {
+		cfg.LogMetadataLitellmParamsWhitelist = lc.GeneralSettings.LogMetadataLitellmParams
+	}
 	applyDurationSetting("upstream_non_stream_timeout", lc.GeneralSettings.UpstreamNonStreamTimeout, &cfg.UpstreamNonStreamTimeout)
 	applyDurationSetting("upstream_dial_timeout", lc.GeneralSettings.UpstreamDialTimeout, &cfg.UpstreamDialTimeout)
 	applyDurationSetting("upstream_keep_alive_timeout", lc.GeneralSettings.UpstreamKeepAlive, &cfg.UpstreamKeepAlive)
@@ -414,8 +434,17 @@ func loadYAMLConfig(path string, cfg *Config) {
 		apiBase := entry.Params.APIBase
 		region := resolveEnvRef(entry.Params.Region)
 		searchProvider := resolveEnvRef(entry.Params.SearchProvider)
+		timeout := time.Duration(0)
 		if v := resolveEnvRef(entry.Params.AwsRegionName); v != "" {
 			region = v
+		}
+		if entry.Params.Timeout != "" {
+			d, err := time.ParseDuration(entry.Params.Timeout)
+			if err != nil {
+				slog.Warn("invalid model timeout in config, ignoring", "model_name", entry.ModelName, "model", model, "value", entry.Params.Timeout, "error", err)
+			} else if d > 0 {
+				timeout = d
+			}
 		}
 
 		// Register model_name -> provider-prefixed model alias
@@ -437,13 +466,14 @@ func loadYAMLConfig(path string, cfg *Config) {
 		if entry.ModelName != "" {
 			configKey = entry.ModelName
 		}
-		if configKey != "" && (apiKey != "" || apiBase != "" || region != "" || searchProvider != "" || len(entry.Params.ExtraParams) > 0) {
+		if configKey != "" && (apiKey != "" || apiBase != "" || region != "" || searchProvider != "" || len(entry.Params.ExtraParams) > 0 || timeout > 0) {
 			cfg.ModelConfigs[configKey] = ModelConfig{
 				APIKey:         apiKey,
 				APIBase:        apiBase,
 				Region:         region,
 				SearchProvider: searchProvider,
 				ExtraParams:    entry.Params.ExtraParams,
+				Timeout:        timeout,
 			}
 		}
 
