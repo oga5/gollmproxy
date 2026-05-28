@@ -207,6 +207,7 @@ model_list:
     litellm_params:
       model: bedrock/openai.gpt-oss-20b-1:0
       region: ap-northeast-1
+      timeout: 90s
   - model_name: claude-sonnet-bedrock
     litellm_params:
       model: bedrock_openai/anthropic.claude-3-5-sonnet-20241022-v2:0
@@ -240,10 +241,11 @@ environment_variables:
   - `bedrock_include_reasoning`: Bedrock 応答中の `<reasoning>...</reasoning>` をそのまま返すか。未設定時は `false`
   - `required_metadata_keys`: `/v1/chat/completions` の `metadata` フィールドで必須とするキーのリスト。指定したキーが存在しないまたは空の場合は HTTP 400 を返す
 - `model_list`: `litellm_params.model` のプレフィックス (`openai/`, `gemini/`, `bedrock/`, `bedrock_openai/`) でプロバイダ判定
+- `model_list.litellm_params.timeout`: モデル単位の非ストリーミング上流タイムアウト（Goのduration形式）。未設定時は `general_settings.upstream_non_stream_timeout` を使用
 - Bedrock 利用時 (`bedrock/`, `bedrock_openai/` 共通) は `litellm_params.region` を優先し、未指定なら `AWS_REGION` または `AWS_DEFAULT_REGION` を利用。`bedrock_openai/` は `api_base` でエンドポイントURLを上書き可能
 - `model_name` がある場合の個別設定は `model_name` 単位で保持されるため、同じ `litellm_params.model` を複数の別名で使っても `region` や `api_base` は上書きされない
 - PostgreSQL ログの `model_name` 列と token budget 判定には、`model_list.model_name` で指定した値（またはクライアントが直接指定した `model` 値）が使われる
-- PostgreSQL ログの `metadata.litellm_params` には、`litellm_params` のうち `model` / `api_base` / `region` / `search_provider` だけが保存される。`api_key` やその他のキーは保存されない
+- PostgreSQL ログの `metadata.litellm_params` は `general_settings.log_metadata_litellm_params_whitelist` で保存キーを制御できる（デフォルト: `model`, `api_base`, `region`, `search_provider`, `service_tier`）
 - `search_tools`: 検索ツール設定（Tavily等）
 - `google_ai_studio_passthrough`: Geminiパススルー用APIキー設定
 - `environment_variables`: YAMLからOS環境変数をセット（既存の環境変数が優先）
@@ -268,7 +270,7 @@ environment_variables:
 CREATE TABLE token_budgets (
   app_id text NOT NULL,
   model_name text NOT NULL,
-  token_budget bigint NOT NULL CHECK (token_budget >= 0),
+  tokens_per_day bigint NOT NULL CHECK (tokens_per_day >= 0),
   PRIMARY KEY (app_id, model_name)
 );
 
@@ -389,7 +391,7 @@ CREATE TABLE llm_payloads (
 
 `metadata` には `provider`, `path`, `status_code`, `latency_ms`, `user`, `client_ip` 等が自動的に格納される。リクエスト時に指定した `metadata` オブジェクトのキー（`app_id`, `dept_cd`, `user_id` 等）も同じカラムにマージされる。
 
-さらに `/v1/chat/completions` では、サーバー設定由来の `litellm_params` 情報が `metadata.litellm_params` に追加される。保存されるのは次のホワイトリストだけで、`api_key` やその他の設定値は保存されない。
+さらに `/v1/chat/completions` では、サーバー設定由来の `litellm_params` 情報が `metadata.litellm_params` に追加される。保存キーは `general_settings.log_metadata_litellm_params_whitelist` で制御でき、デフォルトは次の値。
 
 ```json
 {
@@ -397,7 +399,8 @@ CREATE TABLE llm_payloads (
     "model": "openai/gpt-4o",
     "api_base": "https://api.openai.com",
     "region": "ap-northeast-1",
-    "search_provider": "tavily"
+    "search_provider": "tavily",
+    "service_tier": "flex"
   }
 }
 ```

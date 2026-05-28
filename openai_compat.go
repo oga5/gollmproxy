@@ -76,7 +76,7 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 			perModelCfg = mc
 		}
 		logModelName := requestedModel
-		logMetadata := buildLogMetadata(req.Metadata, modelField, perModelCfg)
+		logMetadata := buildLogMetadata(req.Metadata, modelField, perModelCfg, cfg.LogMetadataLitellmParamsWhitelist)
 
 		if !validModelName.MatchString(model) {
 			writeErrorJSON(w, http.StatusBadRequest, "invalid model name", "invalid_request_error")
@@ -139,8 +139,8 @@ func parseModelPrefix(model string) (provider, modelName string) {
 	return "openai", model
 }
 
-func forwardOpenAICompatChat(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, provider, providerLabel, logModelName, targetURL, authHeader string, metadata map[string]any, bodyBytes, upstreamBody []byte, reqID string, start time.Time) {
-	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream)
+func forwardOpenAICompatChat(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, provider, providerLabel, logModelName, targetURL, authHeader string, metadata map[string]any, bodyBytes, upstreamBody []byte, reqID string, start time.Time, timeout time.Duration) {
+	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream, timeout)
 	defer cancel()
 
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, "POST", targetURL, bytes.NewReader(upstreamBody))
@@ -227,7 +227,7 @@ func handleOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 	}
 	targetURL := baseURL + "/v1/chat/completions"
 
-	forwardOpenAICompatChat(w, r, cfg, logger, req, "openai", "openai", logModelName, targetURL, "Bearer "+apiKey, metadata, bodyBytes, modifiedBody, reqID, start)
+	forwardOpenAICompatChat(w, r, cfg, logger, req, "openai", "openai", logModelName, targetURL, "Bearer "+apiKey, metadata, bodyBytes, modifiedBody, reqID, start, perModelCfg.Timeout)
 }
 
 // rewriteModelField replaces the model field value in the JSON body.
@@ -282,7 +282,7 @@ func handleOllamaChatProvider(w http.ResponseWriter, r *http.Request, cfg *Confi
 	if apiKey := perModelCfg.APIKey; apiKey != "" {
 		authHeader = "Bearer " + apiKey
 	}
-	forwardOpenAICompatChat(w, r, cfg, logger, req, "ollama_chat", "ollama", logModelName, targetURL, authHeader, metadata, bodyBytes, modifiedBody, reqID, start)
+	forwardOpenAICompatChat(w, r, cfg, logger, req, "ollama_chat", "ollama", logModelName, targetURL, authHeader, metadata, bodyBytes, modifiedBody, reqID, start, perModelCfg.Timeout)
 }
 
 func handleOpenRouterProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model, logModelName string, metadata map[string]any, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
@@ -304,7 +304,7 @@ func handleOpenRouterProvider(w http.ResponseWriter, r *http.Request, cfg *Confi
 	}
 	targetURL := baseURL + "/v1/chat/completions"
 
-	forwardOpenAICompatChat(w, r, cfg, logger, req, "openrouter", "openrouter", logModelName, targetURL, "Bearer "+apiKey, metadata, bodyBytes, modifiedBody, reqID, start)
+	forwardOpenAICompatChat(w, r, cfg, logger, req, "openrouter", "openrouter", logModelName, targetURL, "Bearer "+apiKey, metadata, bodyBytes, modifiedBody, reqID, start, perModelCfg.Timeout)
 }
 
 func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model, logModelName string, metadata map[string]any, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
@@ -344,7 +344,7 @@ func handleGeminiProvider(w http.ResponseWriter, r *http.Request, cfg *Config, l
 		return
 	}
 
-	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream)
+	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream, perModelCfg.Timeout)
 	defer cancel()
 
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, "POST", targetURL, bytes.NewReader(geminiBody))
@@ -488,19 +488,30 @@ func logRequest(logger *RequestLogger, cfg *Config, reqID string, r *http.Reques
 
 // buildLogMetadata clones request metadata and injects server-side litellm_params metadata.
 // metadata.litellm_params is reserved for proxy-generated values and always overwrites any client-provided value.
-func buildLogMetadata(metadata map[string]any, configuredModel string, perModelCfg ModelConfig) map[string]any {
-	litellmParams := make(map[string]any, 4)
+// Injected keys are filtered by whitelist.
+func buildLogMetadata(metadata map[string]any, configuredModel string, perModelCfg ModelConfig, whitelist []string) map[string]any {
+	candidates := make(map[string]any)
 	if configuredModel != "" {
-		litellmParams["model"] = configuredModel
+		candidates["model"] = configuredModel
 	}
 	if perModelCfg.APIBase != "" {
-		litellmParams["api_base"] = perModelCfg.APIBase
+		candidates["api_base"] = perModelCfg.APIBase
 	}
 	if perModelCfg.Region != "" {
-		litellmParams["region"] = perModelCfg.Region
+		candidates["region"] = perModelCfg.Region
 	}
 	if perModelCfg.SearchProvider != "" {
-		litellmParams["search_provider"] = perModelCfg.SearchProvider
+		candidates["search_provider"] = perModelCfg.SearchProvider
+	}
+	if v, ok := perModelCfg.ExtraParams["service_tier"]; ok {
+		candidates["service_tier"] = v
+	}
+
+	litellmParams := make(map[string]any, len(candidates))
+	for _, key := range whitelist {
+		if value, ok := candidates[key]; ok {
+			litellmParams[key] = value
+		}
 	}
 
 	if len(metadata) == 0 && len(litellmParams) == 0 {

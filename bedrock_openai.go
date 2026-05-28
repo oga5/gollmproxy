@@ -33,7 +33,7 @@ func handleBedrockOpenAIProvider(w http.ResponseWriter, r *http.Request, cfg *Co
 	}
 	targetURL := strings.TrimRight(baseURL, "/") + "/openai/v1/chat/completions"
 
-	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream)
+	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream, perModelCfg.Timeout)
 	defer cancel()
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(upstreamCtx, awsconfig.WithRegion(region))

@@ -36,7 +36,7 @@ var newBedrockClient = func(ctx context.Context, region string) (bedrockClient, 
 func handleBedrockProvider(w http.ResponseWriter, r *http.Request, cfg *Config, logger *RequestLogger, req OpenAIChatRequest, model, logModelName string, metadata map[string]any, bodyBytes []byte, reqID string, start time.Time, perModelCfg ModelConfig) {
 	_, strippedBody := extractAndStripMetadata(bodyBytes)
 	modifiedBody := mergeExtraParams(rewriteModelField(strippedBody, model), perModelCfg.ExtraParams)
-	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream)
+	upstreamCtx, cancel := withUpstreamTimeout(r.Context(), !req.Stream, perModelCfg.Timeout)
 	defer cancel()
 
 	region := perModelCfg.Region

@@ -87,6 +87,27 @@ func TestLoadYAMLConfigStoresSearchProviderInModelConfig(t *testing.T) {
 	}
 }
 
+func TestLoadYAMLConfigStoresPerModelTimeout(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := []byte(`model_list:
+  - model_name: gpt-4o-fast
+    litellm_params:
+      model: openai/gpt-4o
+      timeout: 45s
+`)
+	if err := os.WriteFile(configPath, configBody, 0644); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+
+	cfg := &Config{}
+	loadYAMLConfig(configPath, cfg)
+
+	if got := cfg.ModelConfigs["gpt-4o-fast"].Timeout.String(); got != "45s" {
+		t.Fatalf("unexpected timeout: %q", got)
+	}
+}
+
 func TestBuildLogMetadataAddsWhitelistedLitellmParams(t *testing.T) {
 	metadata := buildLogMetadata(map[string]any{
 		"app_id":         "app1",
@@ -95,7 +116,8 @@ func TestBuildLogMetadataAddsWhitelistedLitellmParams(t *testing.T) {
 		APIBase:        "https://api.openai.com",
 		Region:         "ap-northeast-1",
 		SearchProvider: "tavily",
-	})
+		ExtraParams:    map[string]any{"service_tier": "flex"},
+	}, defaultLogMetadataLitellmParamsWhitelist)
 
 	got, ok := metadata["litellm_params"].(map[string]any)
 	if !ok {
@@ -113,10 +135,34 @@ func TestBuildLogMetadataAddsWhitelistedLitellmParams(t *testing.T) {
 	if got["search_provider"] != "tavily" {
 		t.Fatalf("unexpected search_provider metadata: %#v", got["search_provider"])
 	}
+	if got["service_tier"] != "flex" {
+		t.Fatalf("unexpected service_tier metadata: %#v", got["service_tier"])
+	}
 	if _, ok := got["api_key"]; ok {
 		t.Fatal("api_key must not be included in litellm_params metadata")
 	}
 	if metadata["app_id"] != "app1" {
 		t.Fatalf("unexpected app_id metadata: %#v", metadata["app_id"])
+	}
+}
+
+func TestBuildLogMetadataWhitelistCanExcludeFields(t *testing.T) {
+	metadata := buildLogMetadata(nil, "openai/gpt-4o", ModelConfig{
+		APIBase:     "https://api.openai.com",
+		ExtraParams: map[string]any{"service_tier": "flex"},
+	}, []string{"model", "service_tier"})
+
+	got, ok := metadata["litellm_params"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected litellm_params map, got %#v", metadata["litellm_params"])
+	}
+	if got["model"] != "openai/gpt-4o" {
+		t.Fatalf("unexpected model metadata: %#v", got["model"])
+	}
+	if got["service_tier"] != "flex" {
+		t.Fatalf("unexpected service_tier metadata: %#v", got["service_tier"])
+	}
+	if _, exists := got["api_base"]; exists {
+		t.Fatalf("api_base must be excluded by whitelist, got %#v", got["api_base"])
 	}
 }
