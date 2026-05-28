@@ -490,7 +490,7 @@ func logRequest(logger *RequestLogger, cfg *Config, reqID string, r *http.Reques
 // metadata.litellm_params is reserved for proxy-generated values and always overwrites any client-provided value.
 // Injected keys are filtered by whitelist.
 func buildLogMetadata(metadata map[string]any, configuredModel string, perModelCfg ModelConfig, whitelist []string) map[string]any {
-	candidates := make(map[string]any, 5)
+	candidates := make(map[string]any)
 	if configuredModel != "" {
 		candidates["model"] = configuredModel
 	}

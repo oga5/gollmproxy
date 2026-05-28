@@ -116,7 +116,7 @@ func TestBuildLogMetadataAddsWhitelistedLitellmParams(t *testing.T) {
 		APIBase:        "https://api.openai.com",
 		Region:         "ap-northeast-1",
 		SearchProvider: "tavily",
-		ExtraParams:    map[string]interface{}{"service_tier": "flex"},
+		ExtraParams:    map[string]any{"service_tier": "flex"},
 	}, defaultLogMetadataLitellmParamsWhitelist)
 
 	got, ok := metadata["litellm_params"].(map[string]any)
@@ -149,7 +149,7 @@ func TestBuildLogMetadataAddsWhitelistedLitellmParams(t *testing.T) {
 func TestBuildLogMetadataWhitelistCanExcludeFields(t *testing.T) {
 	metadata := buildLogMetadata(nil, "openai/gpt-4o", ModelConfig{
 		APIBase:     "https://api.openai.com",
-		ExtraParams: map[string]interface{}{"service_tier": "flex"},
+		ExtraParams: map[string]any{"service_tier": "flex"},
 	}, []string{"model", "service_tier"})
 
 	got, ok := metadata["litellm_params"].(map[string]any)

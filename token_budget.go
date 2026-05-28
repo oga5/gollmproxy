@@ -58,7 +58,7 @@ func (s *PostgresTokenBudgetStore) ensureSchema() error {
 CREATE TABLE IF NOT EXISTS token_budgets (
   app_id text NOT NULL,
   model_name text NOT NULL,
-	  tokens_per_day bigint NOT NULL CHECK (tokens_per_day >= 0),
+  tokens_per_day bigint NOT NULL CHECK (tokens_per_day >= 0),
   PRIMARY KEY (app_id, model_name)
 )`
 
