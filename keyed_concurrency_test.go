@@ -35,7 +35,7 @@ func TestKeyedConcurrencyController_AllowsMaxConcurrencyAndWaits(t *testing.T) {
 		ch <- result{handle: h, decision: d, err: err}
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForQueuedRequests(t, ctrl, "app:model", 1)
 	h1.Release()
 
 	res := <-ch
@@ -68,7 +68,7 @@ func TestKeyedConcurrencyController_RejectsWhenQueueFull(t *testing.T) {
 			h.Release()
 		}
 	}()
-	time.Sleep(50 * time.Millisecond)
+	waitForQueuedRequests(t, ctrl, "app:model", 1)
 
 	_, decision, err := ctrl.Acquire(context.Background(), "app:model", time.Second)
 	if !errors.Is(err, ErrConcurrencyQueueFull) {

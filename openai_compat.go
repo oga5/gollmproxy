@@ -88,7 +88,14 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 			handle, decision, err := cfg.ConcurrencyController.Acquire(r.Context(), controlKey, cfg.ConcurrencyMaxWait)
 			logMetadata = appendConcurrencyMetadata(logMetadata, cfg, decision)
 			if err != nil {
-				slog.Warn("concurrency admission rejected", "request_id", reqID, "scope", cfg.ConcurrencyControlScope, "key", controlKey, "reason", decision.RejectReason, "wait_ms", decision.WaitDuration.Milliseconds())
+				slog.Warn(
+					"concurrency admission rejected",
+					"request_id", reqID,
+					"scope", cfg.ConcurrencyControlScope,
+					"key", controlKey,
+					"reason", decision.RejectReason,
+					"wait_ms", decision.WaitDuration.Milliseconds(),
+				)
 				logRequest(logger, cfg, reqID, r, provider, logModelName, req.Stream, http.StatusTooManyRequests, start, string(bodyBytes), "", req.User, logMetadata, nil)
 				switch {
 				case errors.Is(err, ErrConcurrencyQueueFull):
@@ -103,7 +110,13 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 				return
 			}
 			if decision.Waited {
-				slog.Info("concurrency slot acquired after wait", "request_id", reqID, "scope", cfg.ConcurrencyControlScope, "key", controlKey, "wait_ms", decision.WaitDuration.Milliseconds())
+				slog.Info(
+					"concurrency slot acquired after wait",
+					"request_id", reqID,
+					"scope", cfg.ConcurrencyControlScope,
+					"key", controlKey,
+					"wait_ms", decision.WaitDuration.Milliseconds(),
+				)
 			}
 			defer handle.Release()
 		}

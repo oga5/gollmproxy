@@ -89,10 +89,11 @@ func TestChatCompletions_ConcurrencyControl_StreamHoldsSlotUntilDone(t *testing.
 		done2 <- post()
 	}()
 
+	waitForQueuedRequests(t, controller, "gpt-4o", 1)
 	select {
 	case <-upstreamStarted:
 		t.Fatal("second request should be queued while first stream is running")
-	case <-time.After(150 * time.Millisecond):
+	default:
 	}
 
 	release <- struct{}{}

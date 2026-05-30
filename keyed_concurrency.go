@@ -76,6 +76,14 @@ func NewKeyedConcurrencyController(maxConcurrency, maxQueue int) (*KeyedConcurre
 	}, nil
 }
 
+// Acquire tries to reserve one execution slot for the given key.
+//
+// It returns an admissionHandle on success and the caller must always call Release.
+// If inflight is full and queue has capacity, Acquire waits up to maxWait (or until ctx is done).
+//
+// A subtle race exists around timeout/cancel boundaries: if a release concurrently transfers
+// the slot to this waiter, Acquire may still return a handle even when ctx has been canceled
+// or maxWait has elapsed. This is intentional to avoid losing an already-transferred slot.
 func (c *KeyedConcurrencyController) Acquire(ctx context.Context, key string, maxWait time.Duration) (*admissionHandle, admissionDecision, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -134,6 +142,7 @@ func (c *KeyedConcurrencyController) Acquire(ctx context.Context, key string, ma
 			decision.RejectReason = "context_canceled"
 			return nil, decision, ErrConcurrencyCanceled
 		}
+		// The waiter was already popped by release() and the inflight slot was transferred.
 		decision.QueueResult = "acquired"
 		return &admissionHandle{controller: c, key: key}, decision, nil
 	case <-timer:
@@ -143,6 +152,7 @@ func (c *KeyedConcurrencyController) Acquire(ctx context.Context, key string, ma
 			decision.RejectReason = "wait_timeout"
 			return nil, decision, ErrConcurrencyWaitTimeout
 		}
+		// The waiter was already popped by release() and the inflight slot was transferred.
 		decision.QueueResult = "acquired"
 		return &admissionHandle{controller: c, key: key}, decision, nil
 	}
@@ -163,9 +173,6 @@ func (c *KeyedConcurrencyController) removeWaiter(key string, waiter chan struct
 		}
 		st.waiters = append(st.waiters[:i], st.waiters[i+1:]...)
 		st.waiting--
-		if st.waiting < 0 {
-			st.waiting = 0
-		}
 		if st.inflight == 0 && st.waiting == 0 {
 			delete(c.perKey, key)
 		}
