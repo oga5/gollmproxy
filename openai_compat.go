@@ -78,6 +78,49 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 		logModelName := requestedModel
 		logMetadata := buildLogMetadata(req.Metadata, modelField, perModelCfg, cfg.LogMetadataLitellmParamsWhitelist)
 
+		if cfg.ConcurrencyControlEnabled && cfg.ConcurrencyController != nil {
+			controlKey, err := resolveConcurrencyKey(cfg.ConcurrencyControlScope, logMetadata, logModelName)
+			if err != nil {
+				writeErrorJSON(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
+				return
+			}
+
+			handle, decision, err := cfg.ConcurrencyController.Acquire(r.Context(), controlKey, cfg.ConcurrencyMaxWait)
+			logMetadata = appendConcurrencyMetadata(logMetadata, cfg, decision)
+			if err != nil {
+				slog.Warn(
+					"concurrency admission rejected",
+					"request_id", reqID,
+					"scope", cfg.ConcurrencyControlScope,
+					"key", controlKey,
+					"reason", decision.RejectReason,
+					"wait_ms", decision.WaitDuration.Milliseconds(),
+				)
+				logRequest(logger, cfg, reqID, r, provider, logModelName, req.Stream, http.StatusTooManyRequests, start, string(bodyBytes), "", req.User, logMetadata, nil)
+				switch {
+				case errors.Is(err, ErrConcurrencyQueueFull):
+					writeErrorJSON(w, http.StatusTooManyRequests, "concurrency queue is full", "rate_limit_error")
+				case errors.Is(err, ErrConcurrencyWaitTimeout):
+					writeErrorJSON(w, http.StatusTooManyRequests, "timed out waiting for concurrency slot", "rate_limit_error")
+				case errors.Is(err, ErrConcurrencyCanceled):
+					writeErrorJSON(w, http.StatusTooManyRequests, "request canceled while waiting for concurrency slot", "rate_limit_error")
+				default:
+					writeErrorJSON(w, http.StatusTooManyRequests, "concurrency admission rejected", "rate_limit_error")
+				}
+				return
+			}
+			if decision.Waited {
+				slog.Info(
+					"concurrency slot acquired after wait",
+					"request_id", reqID,
+					"scope", cfg.ConcurrencyControlScope,
+					"key", controlKey,
+					"wait_ms", decision.WaitDuration.Milliseconds(),
+				)
+			}
+			defer handle.Release()
+		}
+
 		if !validModelName.MatchString(model) {
 			writeErrorJSON(w, http.StatusBadRequest, "invalid model name", "invalid_request_error")
 			return
@@ -526,4 +569,24 @@ func buildLogMetadata(metadata map[string]any, configuredModel string, perModelC
 		merged[logLitellmParamsMetadataKey] = litellmParams
 	}
 	return merged
+}
+
+func appendConcurrencyMetadata(metadata map[string]any, cfg *Config, decision admissionDecision) map[string]any {
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["concurrency_scope"] = normalizeConcurrencyScope(cfg.ConcurrencyControlScope)
+	metadata["concurrency_key"] = decision.Key
+	metadata["concurrency_max_concurrency"] = cfg.ConcurrencyMaxConcurrency
+	metadata["concurrency_max_queue"] = cfg.ConcurrencyMaxQueue
+	metadata["concurrency_max_wait_ms"] = cfg.ConcurrencyMaxWait.Milliseconds()
+	metadata["concurrency_waited"] = decision.Waited
+	metadata["concurrency_wait_ms"] = decision.WaitDuration.Milliseconds()
+	metadata["concurrency_queue_result"] = decision.QueueResult
+	metadata["concurrency_inflight_at_admission"] = decision.InflightAtAdmission
+	metadata["concurrency_waiting_at_admission"] = decision.WaitingAtAdmission
+	if decision.RejectReason != "" {
+		metadata["concurrency_reject_reason"] = decision.RejectReason
+	}
+	return metadata
 }
