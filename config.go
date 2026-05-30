@@ -64,6 +64,13 @@ type Config struct {
 	// It is initialized at runtime when TokenBudgetEnabled is true.
 	TokenBudgetStore TokenBudgetStore
 
+	ConcurrencyControlEnabled bool
+	ConcurrencyControlScope   string
+	ConcurrencyMaxConcurrency int
+	ConcurrencyMaxQueue       int
+	ConcurrencyMaxWait        time.Duration
+	ConcurrencyController     *KeyedConcurrencyController
+
 	// PassThroughEndpoints holds custom pass-through proxy endpoints from config.
 	PassThroughEndpoints []PassThroughEndpoint
 
@@ -147,6 +154,11 @@ type generalSettings struct {
 	TrustedProxyCIDRs             []string                  `yaml:"trusted_proxy_cidrs"`
 	PostgresDSN                   string                    `yaml:"postgres_dsn"`
 	TokenBudgetEnabled            *bool                     `yaml:"token_budget_enabled"`
+	ConcurrencyControlEnabled     *bool                     `yaml:"concurrency_control_enabled"`
+	ConcurrencyControlScope       string                    `yaml:"concurrency_control_scope"`
+	ConcurrencyControlMax         int                       `yaml:"concurrency_control_max_concurrency"`
+	ConcurrencyControlMaxQueue    int                       `yaml:"concurrency_control_max_queue"`
+	ConcurrencyControlMaxWait     string                    `yaml:"concurrency_control_max_wait"`
 	PassThroughEndpoints          []yamlPassThroughEndpoint `yaml:"pass_through_endpoints"`
 	RequiredMetadataKeys          []string                  `yaml:"required_metadata_keys"`
 	LogMetadataLitellmParams      []string                  `yaml:"log_metadata_litellm_params_whitelist"`
@@ -219,6 +231,10 @@ func LoadConfig() *Config {
 		UpstreamResponseHeaderTimeout: defaultUpstreamResponseHeaderTimeout,
 		UpstreamExpectContinueTimeout: defaultUpstreamExpectContinueTimeout,
 		UpstreamIdleConnTimeout:       defaultUpstreamIdleConnTimeout,
+		ConcurrencyControlScope:       concurrencyScopeAppModel,
+		ConcurrencyMaxConcurrency:     2,
+		ConcurrencyMaxQueue:           4,
+		ConcurrencyMaxWait:            3 * time.Second,
 		LogMetadataLitellmParamsWhitelist: append([]string(nil),
 			defaultLogMetadataLitellmParamsWhitelist...),
 	}
@@ -258,6 +274,11 @@ func LoadConfig() *Config {
 			cfg.TokenBudgetEnabled = enabled
 		}
 	}
+	if v := os.Getenv("CONCURRENCY_CONTROL_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.ConcurrencyControlEnabled = enabled
+		}
+	}
 
 	if v := os.Getenv("OPENAI_API_KEY"); v != "" {
 		cfg.OpenAIAPIKey = v
@@ -288,6 +309,17 @@ func LoadConfig() *Config {
 	}
 	if v := os.Getenv("OPENROUTER_BASE_URL"); v != "" {
 		cfg.OpenRouterBaseURL = v
+	}
+
+	cfg.ConcurrencyControlScope = normalizeConcurrencyScope(cfg.ConcurrencyControlScope)
+	if cfg.ConcurrencyControlEnabled {
+		controller, err := NewKeyedConcurrencyController(cfg.ConcurrencyMaxConcurrency, cfg.ConcurrencyMaxQueue)
+		if err != nil {
+			slog.Warn("invalid concurrency control config; disabling", "error", err)
+			cfg.ConcurrencyControlEnabled = false
+		} else {
+			cfg.ConcurrencyController = controller
+		}
 	}
 
 	return cfg
@@ -369,6 +401,19 @@ func loadYAMLConfig(path string, cfg *Config) {
 	if lc.GeneralSettings.TokenBudgetEnabled != nil {
 		cfg.TokenBudgetEnabled = *lc.GeneralSettings.TokenBudgetEnabled
 	}
+	if lc.GeneralSettings.ConcurrencyControlEnabled != nil {
+		cfg.ConcurrencyControlEnabled = *lc.GeneralSettings.ConcurrencyControlEnabled
+	}
+	if lc.GeneralSettings.ConcurrencyControlScope != "" {
+		cfg.ConcurrencyControlScope = normalizeConcurrencyScope(lc.GeneralSettings.ConcurrencyControlScope)
+	}
+	if lc.GeneralSettings.ConcurrencyControlMax > 0 {
+		cfg.ConcurrencyMaxConcurrency = lc.GeneralSettings.ConcurrencyControlMax
+	}
+	if lc.GeneralSettings.ConcurrencyControlMaxQueue >= 0 {
+		cfg.ConcurrencyMaxQueue = lc.GeneralSettings.ConcurrencyControlMaxQueue
+	}
+	applyDurationSetting("concurrency_control_max_wait", lc.GeneralSettings.ConcurrencyControlMaxWait, &cfg.ConcurrencyMaxWait)
 	if len(lc.GeneralSettings.RequiredMetadataKeys) > 0 {
 		cfg.RequiredMetadataKeys = lc.GeneralSettings.RequiredMetadataKeys
 	}

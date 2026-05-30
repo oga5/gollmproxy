@@ -164,6 +164,7 @@ curl http://localhost:8080/health
 | `GEMINI_BASE_URL` | Gemini APIベースURL | `https://generativelanguage.googleapis.com` |
 | `TAVILY_BASE_URL` | Tavily APIベースURL | `https://api.tavily.com` |
 | `TOKEN_BUDGET_ENABLED` | app_id/model_name 単位のトークン予算管理を有効化 | `false` |
+| `CONCURRENCY_CONTROL_ENABLED` | キー単位の同時実行数制御を有効化 | `false` |
 
 ### 設定ファイル (YAML)
 
@@ -188,6 +189,11 @@ general_settings:
   upstream_expect_continue_timeout: 1s
   upstream_idle_conn_timeout: 90s
   token_budget_enabled: false
+  concurrency_control_enabled: false
+  concurrency_control_scope: app_model
+  concurrency_control_max_concurrency: 2
+  concurrency_control_max_queue: 4
+  concurrency_control_max_wait: 3s
   bedrock_include_reasoning: false
   required_metadata_keys:
     - app_id
@@ -238,6 +244,11 @@ environment_variables:
   - `upstream_non_stream_timeout`: 非ストリーミング上流リクエストのコンテキストタイムアウト（Goのduration形式）
   - `upstream_dial_timeout` / `upstream_keep_alive_timeout` / `upstream_tls_handshake_timeout` / `upstream_response_header_timeout` / `upstream_expect_continue_timeout` / `upstream_idle_conn_timeout`: 上流接続用 `http.Transport` の各timeout（Goのduration形式）
   - `token_budget_enabled`: `/v1/chat/completions` の予算管理を有効化するか（デフォルト: `false`）。`metadata.app_id` とログ保存時の `model_name` を使って判定する
+  - `concurrency_control_enabled`: `/v1/chat/completions` のキー単位同時実行制御を有効化するか（デフォルト: `false`）
+  - `concurrency_control_scope`: 制御キーの単位（`app` / `model` / `app_model`。デフォルト: `app_model`）
+  - `concurrency_control_max_concurrency`: キーごとの最大同時実行数（デフォルト: `2`）
+  - `concurrency_control_max_queue`: キーごとの最大待機数（デフォルト: `4`）
+  - `concurrency_control_max_wait`: 待機タイムアウト（Goのduration形式、デフォルト: `3s`）
   - `bedrock_include_reasoning`: Bedrock 応答中の `<reasoning>...</reasoning>` をそのまま返すか。未設定時は `false`
   - `required_metadata_keys`: `/v1/chat/completions` の `metadata` フィールドで必須とするキーのリスト。指定したキーが存在しないまたは空の場合は HTTP 400 を返す
 - `model_list`: `litellm_params.model` のプレフィックス (`openai/`, `gemini/`, `bedrock/`, `bedrock_openai/`) でプロバイダ判定
@@ -265,6 +276,24 @@ environment_variables:
 予算はソフトリミットで、invoke 後に `usage.total_tokens` を `token_usage_daily` へ upsert 加算するため、1リクエストで予算超過することは許容される。
 また、同一 `app_id/model_name` への同時リクエストが複数ある場合、事前チェックが同時に通過して超過量が大きくなる可能性がある。
 厳密な上限制御が必要な場合は、DBロック（例: advisory lock）や更新時の競合制御を追加する運用を推奨。
+
+### 同時実行数制御（キー単位）
+
+`general_settings.concurrency_control_enabled: true` 時、`/v1/chat/completions` に対してキー単位の admission control を行う。
+
+- 制御キーは `concurrency_control_scope` で選択（`app` / `model` / `app_model`）
+- 上限超過時は待機キューへ入り、`concurrency_control_max_wait` まで待機
+- `concurrency_control_max_queue` を超える待機は即時 429
+- 待機タイムアウト時も 429
+- `stream: true` を含むリクエストは処理完了（ストリーム終了）まで枠を保持
+
+ログ `metadata` には以下を追加:
+
+- `concurrency_scope`
+- `concurrency_key`
+- `concurrency_waited` / `concurrency_wait_ms`
+- `concurrency_queue_result`
+- `concurrency_reject_reason`（拒否時）
 
 ```sql
 CREATE TABLE token_budgets (

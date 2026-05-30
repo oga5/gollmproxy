@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadYAMLConfigKeepsPerModelNameOverrides(t *testing.T) {
@@ -164,5 +165,44 @@ func TestBuildLogMetadataWhitelistCanExcludeFields(t *testing.T) {
 	}
 	if _, exists := got["api_base"]; exists {
 		t.Fatalf("api_base must be excluded by whitelist, got %#v", got["api_base"])
+	}
+}
+
+func TestLoadYAMLConfigConcurrencyControlSettings(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := []byte(`general_settings:
+  concurrency_control_enabled: true
+  concurrency_control_scope: app_id+model_name
+  concurrency_control_max_concurrency: 3
+  concurrency_control_max_queue: 5
+  concurrency_control_max_wait: 7s
+`)
+	if err := os.WriteFile(configPath, configBody, 0644); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+
+	cfg := &Config{
+		ConcurrencyControlScope:   concurrencyScopeAppModel,
+		ConcurrencyMaxConcurrency: 2,
+		ConcurrencyMaxQueue:       4,
+		ConcurrencyMaxWait:        3 * time.Second,
+	}
+	loadYAMLConfig(configPath, cfg)
+
+	if !cfg.ConcurrencyControlEnabled {
+		t.Fatalf("expected concurrency control enabled")
+	}
+	if cfg.ConcurrencyControlScope != concurrencyScopeAppModel {
+		t.Fatalf("unexpected scope: %q", cfg.ConcurrencyControlScope)
+	}
+	if cfg.ConcurrencyMaxConcurrency != 3 {
+		t.Fatalf("unexpected max concurrency: %d", cfg.ConcurrencyMaxConcurrency)
+	}
+	if cfg.ConcurrencyMaxQueue != 5 {
+		t.Fatalf("unexpected max queue: %d", cfg.ConcurrencyMaxQueue)
+	}
+	if cfg.ConcurrencyMaxWait != 7*time.Second {
+		t.Fatalf("unexpected max wait: %s", cfg.ConcurrencyMaxWait)
 	}
 }
