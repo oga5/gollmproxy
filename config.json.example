@@ -1,0 +1,107 @@
+{
+  "model_list": [
+    {
+      "model_name": "gpt-4o",
+      "proxy_params": {
+        "model": "openai/gpt-4o",
+        "api_key": "os.environ/OPENAI_API_KEY",
+        "api_base": "https://api.openai.com"
+      }
+    },
+    {
+      "model_name": "gpt-4o-flex",
+      "proxy_params": {
+        "model": "openai/gpt-4o",
+        "api_key": "os.environ/OPENAI_API_KEY",
+        "timeout": "45s",
+        "extra_params": {
+          "service_tier": "flex"
+        }
+      }
+    },
+    {
+      "model_name": "gemini-flash",
+      "proxy_params": {
+        "model": "gemini/gemini-2.5-flash",
+        "api_key": "os.environ/GEMINI_API_KEY"
+      }
+    },
+    {
+      "model_name": "gpt-oss-20b",
+      "proxy_params": {
+        "model": "bedrock/openai.gpt-oss-20b-1:0",
+        "region": "ap-northeast-1"
+      }
+    },
+    {
+      "model_name": "gpt-oss-20b-flex",
+      "proxy_params": {
+        "model": "bedrock/openai.gpt-oss-20b-1:0",
+        "region": "ap-northeast-1",
+        "timeout": "90s",
+        "extra_params": {
+          "service_tier": "flex"
+        }
+      }
+    },
+    {
+      "model_name": "claude-sonnet-bedrock",
+      "proxy_params": {
+        "model": "bedrock_openai/anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "region": "us-east-1"
+      }
+    },
+    {
+      "model_name": "claude-sonnet-bedrock-vpc",
+      "proxy_params": {
+        "model": "bedrock_openai/anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "region": "us-east-1",
+        "api_base": "https://bedrock-runtime.us-east-1.amazonaws.com"
+      }
+    },
+    {
+      "model_name": "text-embedding-3-small",
+      "proxy_params": {
+        "model": "openai/text-embedding-3-small",
+        "api_key": "os.environ/OPENAI_API_KEY"
+      },
+      "model_info": {
+        "mode": "embedding"
+      }
+    },
+    {
+      "model_name": "gemini-embedding",
+      "proxy_params": {
+        "model": "gemini/text-embedding-004",
+        "api_key": "os.environ/GEMINI_API_KEY"
+      },
+      "model_info": {
+        "mode": "embedding"
+      }
+    }
+  ],
+  "environment_variables": {
+    "OPENAI_API_KEY": "sk-...",
+    "GEMINI_API_KEY": "AIza...",
+    "TAVILY_API_KEY": "tvly-...",
+    "AWS_REGION": "ap-northeast-1"
+  },
+  "general_settings": {
+    "port": 8080,
+    "log_file": "gollmproxy.log",
+    "server_read_timeout": "30s",
+    "server_write_timeout": "0s",
+    "server_idle_timeout": "2m",
+    "log_request_body": true,
+    "log_response_body": true,
+    "upstream_non_stream_timeout": "5m",
+    "upstream_dial_timeout": "10s",
+    "upstream_keep_alive_timeout": "30s",
+    "upstream_tls_handshake_timeout": "10s",
+    "upstream_response_header_timeout": "30s",
+    "upstream_expect_continue_timeout": "1s",
+    "upstream_idle_conn_timeout": "90s",
+    "token_budget_enabled": false,
+    "bedrock_include_reasoning": false
+  }
+}

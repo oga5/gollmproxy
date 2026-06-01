@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"log/slog"
 	"net"
@@ -8,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -109,87 +108,87 @@ type PassThroughEndpoint struct {
 	ForwardHeaders bool              // if true, forward all incoming request headers to upstream
 }
 
-// YAML config types
-type yamlConfig struct {
-	ModelList                 []modelListEntry     `yaml:"model_list"`
-	GeneralSettings           generalSettings      `yaml:"general_settings"`
-	EnvironmentVariables      map[string]string    `yaml:"environment_variables"`
-	SearchTools               []searchToolEntry    `yaml:"search_tools"`
-	GoogleAIStudioPassthrough passthroughAPIConfig `yaml:"google_ai_studio_passthrough"`
+// JSON config types
+type jsonConfig struct {
+	ModelList                 []modelListEntry     `json:"model_list"`
+	GeneralSettings           generalSettings      `json:"general_settings"`
+	EnvironmentVariables      map[string]string    `json:"environment_variables"`
+	SearchTools               []searchToolEntry    `json:"search_tools"`
+	GoogleAIStudioPassthrough passthroughAPIConfig `json:"google_ai_studio_passthrough"`
 }
 
 type modelListEntry struct {
-	ModelName string      `yaml:"model_name"`
-	Params    modelParams `yaml:"litellm_params"`
-	ModelInfo modelInfo   `yaml:"model_info"`
+	ModelName string      `json:"model_name"`
+	Params    modelParams `json:"proxy_params"`
+	ModelInfo modelInfo   `json:"model_info"`
 }
 
 type modelInfo struct {
-	Mode string `yaml:"mode"`
+	Mode string `json:"mode"`
 }
 
 type modelParams struct {
-	Model          string                 `yaml:"model"`
-	APIKey         string                 `yaml:"api_key"`
-	APIBase        string                 `yaml:"api_base"`
-	Region         string                 `yaml:"region"`
-	SearchProvider string                 `yaml:"search_provider"`
-	AwsRegionName  string                 `yaml:"aws_region_name"`
-	ExtraParams    map[string]interface{} `yaml:"extra_params"`
-	Timeout        string                 `yaml:"timeout"`
+	Model          string                 `json:"model"`
+	APIKey         string                 `json:"api_key"`
+	APIBase        string                 `json:"api_base"`
+	Region         string                 `json:"region"`
+	SearchProvider string                 `json:"search_provider"`
+	AwsRegionName  string                 `json:"aws_region_name"`
+	ExtraParams    map[string]interface{} `json:"extra_params"`
+	Timeout        string                 `json:"timeout"`
 }
 
 type generalSettings struct {
-	Port                          int                       `yaml:"port"`
-	LogFile                       string                    `yaml:"log_file"`
-	ServerReadTimeout             string                    `yaml:"server_read_timeout"`
-	ServerWriteTimeout            string                    `yaml:"server_write_timeout"`
-	ServerIdleTimeout             string                    `yaml:"server_idle_timeout"`
-	LogRequestBody                *bool                     `yaml:"log_request_body"`
-	LogResponseBody               *bool                     `yaml:"log_response_body"`
-	BedrockIncludeReasoning       *bool                     `yaml:"bedrock_include_reasoning"`
-	MasterKey                     string                    `yaml:"master_key"`
-	KeyHeaderName                 string                    `yaml:"litellm_key_header_name"`
-	TrustedProxyHeader            string                    `yaml:"trusted_proxy_header"`
-	TrustedProxyCIDRs             []string                  `yaml:"trusted_proxy_cidrs"`
-	PostgresDSN                   string                    `yaml:"postgres_dsn"`
-	TokenBudgetEnabled            *bool                     `yaml:"token_budget_enabled"`
-	ConcurrencyControlEnabled     *bool                     `yaml:"concurrency_control_enabled"`
-	ConcurrencyControlScope       string                    `yaml:"concurrency_control_scope"`
-	ConcurrencyControlMax         int                       `yaml:"concurrency_control_max_concurrency"`
-	ConcurrencyControlMaxQueue    int                       `yaml:"concurrency_control_max_queue"`
-	ConcurrencyControlMaxWait     string                    `yaml:"concurrency_control_max_wait"`
-	PassThroughEndpoints          []yamlPassThroughEndpoint `yaml:"pass_through_endpoints"`
-	RequiredMetadataKeys          []string                  `yaml:"required_metadata_keys"`
-	LogMetadataLitellmParams      []string                  `yaml:"log_metadata_litellm_params_whitelist"`
-	UpstreamNonStreamTimeout      string                    `yaml:"upstream_non_stream_timeout"`
-	UpstreamDialTimeout           string                    `yaml:"upstream_dial_timeout"`
-	UpstreamKeepAlive             string                    `yaml:"upstream_keep_alive_timeout"`
-	UpstreamTLSHandshakeTimeout   string                    `yaml:"upstream_tls_handshake_timeout"`
-	UpstreamResponseHeaderTimeout string                    `yaml:"upstream_response_header_timeout"`
-	UpstreamExpectContinueTimeout string                    `yaml:"upstream_expect_continue_timeout"`
-	UpstreamIdleConnTimeout       string                    `yaml:"upstream_idle_conn_timeout"`
+	Port                          int                       `json:"port"`
+	LogFile                       string                    `json:"log_file"`
+	ServerReadTimeout             string                    `json:"server_read_timeout"`
+	ServerWriteTimeout            string                    `json:"server_write_timeout"`
+	ServerIdleTimeout             string                    `json:"server_idle_timeout"`
+	LogRequestBody                *bool                     `json:"log_request_body"`
+	LogResponseBody               *bool                     `json:"log_response_body"`
+	BedrockIncludeReasoning       *bool                     `json:"bedrock_include_reasoning"`
+	MasterKey                     string                    `json:"master_key"`
+	KeyHeaderName                 string                    `json:"litellm_key_header_name"`
+	TrustedProxyHeader            string                    `json:"trusted_proxy_header"`
+	TrustedProxyCIDRs             []string                  `json:"trusted_proxy_cidrs"`
+	PostgresDSN                   string                    `json:"postgres_dsn"`
+	TokenBudgetEnabled            *bool                     `json:"token_budget_enabled"`
+	ConcurrencyControlEnabled     *bool                     `json:"concurrency_control_enabled"`
+	ConcurrencyControlScope       string                    `json:"concurrency_control_scope"`
+	ConcurrencyControlMax         int                       `json:"concurrency_control_max_concurrency"`
+	ConcurrencyControlMaxQueue    int                       `json:"concurrency_control_max_queue"`
+	ConcurrencyControlMaxWait     string                    `json:"concurrency_control_max_wait"`
+	PassThroughEndpoints          []jsonPassThroughEndpoint `json:"pass_through_endpoints"`
+	RequiredMetadataKeys          []string                  `json:"required_metadata_keys"`
+	LogMetadataLitellmParams      []string                  `json:"log_metadata_litellm_params_whitelist"`
+	UpstreamNonStreamTimeout      string                    `json:"upstream_non_stream_timeout"`
+	UpstreamDialTimeout           string                    `json:"upstream_dial_timeout"`
+	UpstreamKeepAlive             string                    `json:"upstream_keep_alive_timeout"`
+	UpstreamTLSHandshakeTimeout   string                    `json:"upstream_tls_handshake_timeout"`
+	UpstreamResponseHeaderTimeout string                    `json:"upstream_response_header_timeout"`
+	UpstreamExpectContinueTimeout string                    `json:"upstream_expect_continue_timeout"`
+	UpstreamIdleConnTimeout       string                    `json:"upstream_idle_conn_timeout"`
 }
 
-type yamlPassThroughEndpoint struct {
-	Path           string            `yaml:"path"`
-	Target         string            `yaml:"target"`
-	Headers        map[string]string `yaml:"headers"`
-	ForwardHeaders bool              `yaml:"forward_headers"`
+type jsonPassThroughEndpoint struct {
+	Path           string            `json:"path"`
+	Target         string            `json:"target"`
+	Headers        map[string]string `json:"headers"`
+	ForwardHeaders bool              `json:"forward_headers"`
 }
 
 type searchToolEntry struct {
-	SearchToolName string           `yaml:"search_tool_name"`
-	Params         searchToolParams `yaml:"litellm_params"`
+	SearchToolName string           `json:"search_tool_name"`
+	Params         searchToolParams `json:"proxy_params"`
 }
 
 type searchToolParams struct {
-	SearchProvider string `yaml:"search_provider"`
-	APIKey         string `yaml:"api_key"`
+	SearchProvider string `json:"search_provider"`
+	APIKey         string `json:"api_key"`
 }
 
 type passthroughAPIConfig struct {
-	APIKey string `yaml:"api_key"`
+	APIKey string `json:"api_key"`
 }
 
 var defaultLogMetadataLitellmParamsWhitelist = []string{
@@ -239,17 +238,17 @@ func LoadConfig() *Config {
 			defaultLogMetadataLitellmParamsWhitelist...),
 	}
 
-	flag.StringVar(&configFile, "config", "", "config file path (YAML)")
+	flag.StringVar(&configFile, "config", "", "config file path (JSON)")
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "server port")
 	flag.StringVar(&cfg.LogFile, "logfile", cfg.LogFile, "request log file path")
 	flag.Parse()
 
-	// Load YAML config file if specified
+	// Load JSON config file if specified
 	if configFile != "" {
-		loadYAMLConfig(configFile, cfg)
+		loadJSONConfig(configFile, cfg)
 	}
 
-	// Environment variables override YAML / defaults
+	// Environment variables override JSON / defaults
 	if v := os.Getenv("LITELLM_MASTER_KEY"); v != "" {
 		cfg.MasterKey = v
 	}
@@ -325,16 +324,16 @@ func LoadConfig() *Config {
 	return cfg
 }
 
-func loadYAMLConfig(path string, cfg *Config) {
+func loadJSONConfig(path string, cfg *Config) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		slog.Error("failed to read config file", "path", path, "error", err)
 		return
 	}
 
-	var lc yamlConfig
-	if err := yaml.Unmarshal(data, &lc); err != nil {
-		slog.Error("failed to parse config file", "path", path, "error", err)
+	var lc jsonConfig
+	if err := json.Unmarshal(data, &lc); err != nil {
+		slog.Error("failed to parse JSON config file", "path", path, "error", err)
 		return
 	}
 
