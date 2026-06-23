@@ -159,8 +159,6 @@ func normalizeAppLogLevel(level string) string {
 	switch normalized {
 	case "debug", "warn", "error":
 		return normalized
-	case "info":
-		return "info"
 	default:
 		return defaultAppLogLevel
 	}
