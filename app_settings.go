@@ -106,6 +106,7 @@ func (s *PostgresAppSettingsStore) Get(ctx context.Context, appID string) (AppSe
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	now = time.Now()
 	cached, ok = s.cache[appID]
 	if ok && now.Before(cached.expiresAt) {
 		return cached.settings, cached.found, nil
@@ -157,7 +158,7 @@ WHERE app_id = $1`
 func normalizeAppLogLevel(level string) string {
 	normalized := strings.ToLower(strings.TrimSpace(level))
 	switch normalized {
-	case "debug", "warn", "error":
+	case "debug", "info", "warn", "error":
 		return normalized
 	default:
 		return defaultAppLogLevel

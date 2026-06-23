@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -41,7 +42,7 @@ func readTestLogEntries(t *testing.T, path string) []LogEntry {
 	}
 
 	var entries []LogEntry
-	for _, line := range bytesSplitLines(data) {
+	for _, line := range bytes.Split(data, []byte{'\n'}) {
 		if len(line) == 0 {
 			continue
 		}
@@ -52,21 +53,6 @@ func readTestLogEntries(t *testing.T, path string) []LogEntry {
 		entries = append(entries, entry)
 	}
 	return entries
-}
-
-func bytesSplitLines(data []byte) [][]byte {
-	var lines [][]byte
-	start := 0
-	for i, b := range data {
-		if b == '\n' {
-			lines = append(lines, data[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(data) {
-		lines = append(lines, data[start:])
-	}
-	return lines
 }
 
 func TestChatCompletionsAppSettingsCanDisableBodyLogging(t *testing.T) {
