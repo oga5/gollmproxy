@@ -96,18 +96,11 @@ func (s *PostgresAppSettingsStore) Get(ctx context.Context, appID string) (AppSe
 		return AppSettings{}, false, nil
 	}
 
-	now := time.Now()
-	s.mu.RLock()
-	cached, ok := s.cache[appID]
-	s.mu.RUnlock()
-	if ok && now.Before(cached.expiresAt) {
-		return cached.settings, cached.found, nil
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now = time.Now()
-	cached, ok = s.cache[appID]
+
+	now := time.Now()
+	cached, ok := s.cache[appID]
 	if ok && now.Before(cached.expiresAt) {
 		return cached.settings, cached.found, nil
 	}
