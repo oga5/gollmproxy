@@ -104,6 +104,13 @@ func (s *PostgresAppSettingsStore) Get(ctx context.Context, appID string) (AppSe
 		return cached.settings, cached.found, nil
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cached, ok = s.cache[appID]
+	if ok && now.Before(cached.expiresAt) {
+		return cached.settings, cached.found, nil
+	}
+
 	const q = `
 SELECT log_level, log_request_body, log_response_body
 FROM app_settings
@@ -116,7 +123,11 @@ WHERE app_id = $1`
 	)
 	err := s.db.QueryRowContext(ctx, q, appID).Scan(&logLevel, &logRequestBody, &logResponseBody)
 	if err == sql.ErrNoRows {
-		s.storeCache(appID, AppSettings{}, false, now)
+		s.cache[appID] = cachedAppSettings{
+			settings:  AppSettings{},
+			found:     false,
+			expiresAt: now.Add(s.ttl),
+		}
 		return AppSettings{}, false, nil
 	}
 	if err != nil {
@@ -135,24 +146,19 @@ WHERE app_id = $1`
 		settings.LogResponseBody = &v
 	}
 
-	s.storeCache(appID, settings, true, now)
+	s.cache[appID] = cachedAppSettings{
+		settings:  settings,
+		found:     true,
+		expiresAt: now.Add(s.ttl),
+	}
 	return settings, true, nil
 }
 
-func (s *PostgresAppSettingsStore) storeCache(appID string, settings AppSettings, found bool, now time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.cache[appID] = cachedAppSettings{
-		settings:  settings,
-		found:     found,
-		expiresAt: now.Add(s.ttl),
-	}
-}
-
 func normalizeAppLogLevel(level string) string {
-	switch strings.ToLower(strings.TrimSpace(level)) {
+	normalized := strings.ToLower(strings.TrimSpace(level))
+	switch normalized {
 	case "debug", "warn", "error":
-		return strings.ToLower(strings.TrimSpace(level))
+		return normalized
 	case "info":
 		return "info"
 	default:

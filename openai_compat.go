@@ -79,8 +79,10 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 		logMetadata := buildLogMetadata(req.Metadata, modelField, perModelCfg, cfg.LogMetadataLitellmParamsWhitelist)
 		appLogSettings, err := resolveEffectiveAppLogSettings(r.Context(), cfg, logMetadata)
 		if err != nil {
-			slog.Warn("failed to load app settings", "request_id", reqID, "error", err)
 			appLogSettings = defaultEffectiveAppLogSettings(cfg)
+			if appLogSettings.Enabled(slog.LevelWarn) {
+				slog.Warn("failed to load app settings", "request_id", reqID, "error", err)
+			}
 		}
 		r = r.WithContext(context.WithValue(r.Context(), appLogSettingsKey, appLogSettings))
 
