@@ -66,6 +66,15 @@ type Config struct {
 	// AppSettingsStore provides per-app runtime overrides such as logging controls.
 	AppSettingsStore AppSettingsStore
 
+	// AppSettingsCacheTTL is the TTL for in-memory cache of app_settings rows.
+	// Set to 0 or negative to disable caching (every request hits the DB).
+	AppSettingsCacheTTL time.Duration
+
+	// TokenBudgetCacheTTL is the TTL for in-memory cache of token_budgets rows.
+	// Set to 0 or negative to disable caching (every request hits the DB).
+	// token_usage_daily is never cached regardless of this setting.
+	TokenBudgetCacheTTL time.Duration
+
 	ConcurrencyControlEnabled bool
 	ConcurrencyControlScope   string
 	ConcurrencyMaxConcurrency int
@@ -171,6 +180,8 @@ type generalSettings struct {
 	UpstreamResponseHeaderTimeout string                    `json:"upstream_response_header_timeout"`
 	UpstreamExpectContinueTimeout string                    `json:"upstream_expect_continue_timeout"`
 	UpstreamIdleConnTimeout       string                    `json:"upstream_idle_conn_timeout"`
+	AppSettingsCacheTTL           string                    `json:"app_settings_cache_ttl"`
+	TokenBudgetCacheTTL           string                    `json:"token_budget_cache_ttl"`
 }
 
 type jsonPassThroughEndpoint struct {
@@ -237,6 +248,8 @@ func LoadConfig() *Config {
 		ConcurrencyMaxConcurrency:     2,
 		ConcurrencyMaxQueue:           4,
 		ConcurrencyMaxWait:            3 * time.Second,
+		AppSettingsCacheTTL:           30 * time.Second,
+		TokenBudgetCacheTTL:           30 * time.Second,
 		LogMetadataLitellmParamsWhitelist: append([]string(nil),
 			defaultLogMetadataLitellmParamsWhitelist...),
 	}
@@ -429,6 +442,8 @@ func loadJSONConfig(path string, cfg *Config) {
 	applyDurationSetting("upstream_response_header_timeout", lc.GeneralSettings.UpstreamResponseHeaderTimeout, &cfg.UpstreamResponseHeaderTimeout)
 	applyDurationSetting("upstream_expect_continue_timeout", lc.GeneralSettings.UpstreamExpectContinueTimeout, &cfg.UpstreamExpectContinueTimeout)
 	applyDurationSetting("upstream_idle_conn_timeout", lc.GeneralSettings.UpstreamIdleConnTimeout, &cfg.UpstreamIdleConnTimeout)
+	applyDurationSetting("app_settings_cache_ttl", lc.GeneralSettings.AppSettingsCacheTTL, &cfg.AppSettingsCacheTTL)
+	applyDurationSetting("token_budget_cache_ttl", lc.GeneralSettings.TokenBudgetCacheTTL, &cfg.TokenBudgetCacheTTL)
 
 	// Load pass-through endpoints
 	for _, ep := range lc.GeneralSettings.PassThroughEndpoints {

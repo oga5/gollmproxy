@@ -102,6 +102,8 @@
     "upstream_expect_continue_timeout": "1s",
     "upstream_idle_conn_timeout": "90s",
     "token_budget_enabled": false,
-    "bedrock_include_reasoning": false
+    "bedrock_include_reasoning": false,
+    "app_settings_cache_ttl": "30s",
+    "token_budget_cache_ttl": "30s"
   }
 }
