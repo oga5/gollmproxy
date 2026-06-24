@@ -273,6 +273,7 @@ curl http://localhost:8080/health
 - `model_name` がある場合の個別設定は `model_name` 単位で保持されるため、同じ `proxy_params.model` を複数の別名で使っても `region` や `api_base` は上書きされない
 - PostgreSQL ログの `model_name` 列と token budget 判定には、`model_list.model_name` で指定した値（またはクライアントが直接指定した `model` 値）が使われる
 - PostgreSQL ログの `metadata.litellm_params` は `general_settings.log_metadata_litellm_params_whitelist` で保存キーを制御できる（デフォルト: `model`, `api_base`, `region`, `search_provider`, `service_tier`）
+- PostgreSQL を有効にすると `app_settings` テーブルも自動作成され、`app_id` ごとに `log_level`、`log_request_body`、`log_response_body` を上書きできる。未設定時は `general_settings.log_request_body` / `log_response_body` の値を使う
 - `search_tools`: 検索ツール設定（Tavily等）
 - `google_ai_studio_passthrough`: Geminiパススルー用APIキー設定
 - `environment_variables`: JSONからOS環境変数をセット（既存の環境変数が優先）
@@ -327,6 +328,25 @@ CREATE TABLE token_usage_daily (
   PRIMARY KEY (usage_date, app_id, model_name)
 );
 ```
+
+### アプリ単位ログ設定
+
+`postgres_dsn` 設定時、`app_settings` テーブルを使って `/v1/chat/completions` のログ出力を `metadata.app_id` 単位で上書きできる。
+
+```sql
+CREATE TABLE app_settings (
+  app_id text PRIMARY KEY,
+  log_level text NOT NULL DEFAULT 'info' CHECK (log_level IN ('debug', 'info', 'warn', 'error')),
+  log_request_body boolean,
+  log_response_body boolean,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+```
+
+- `log_level`: アプリ単位のリクエスト処理ログレベル
+- `log_request_body`: リクエスト本文ログの ON/OFF を上書き
+- `log_response_body`: レスポンス本文ログの ON/OFF を上書き
+- レコードが存在しない app_id はグローバル設定を使う
 
 ### 認証
 

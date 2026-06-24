@@ -63,6 +63,9 @@ type Config struct {
 	// It is initialized at runtime when TokenBudgetEnabled is true.
 	TokenBudgetStore TokenBudgetStore
 
+	// AppSettingsStore provides per-app runtime overrides such as logging controls.
+	AppSettingsStore AppSettingsStore
+
 	ConcurrencyControlEnabled bool
 	ConcurrencyControlScope   string
 	ConcurrencyMaxConcurrency int

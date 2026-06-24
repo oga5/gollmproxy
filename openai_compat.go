@@ -77,6 +77,14 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 		}
 		logModelName := requestedModel
 		logMetadata := buildLogMetadata(req.Metadata, modelField, perModelCfg, cfg.LogMetadataLitellmParamsWhitelist)
+		appLogSettings, err := resolveEffectiveAppLogSettings(r.Context(), cfg, logMetadata)
+		if err != nil {
+			appLogSettings = defaultEffectiveAppLogSettings(cfg)
+			if appLogSettings.Enabled(slog.LevelWarn) {
+				slog.Warn("failed to load app settings", "request_id", reqID, "error", err)
+			}
+		}
+		r = r.WithContext(context.WithValue(r.Context(), appLogSettingsKey, appLogSettings))
 
 		if cfg.ConcurrencyControlEnabled && cfg.ConcurrencyController != nil {
 			controlKey, err := resolveConcurrencyKey(cfg.ConcurrencyControlScope, logMetadata, logModelName)
@@ -88,14 +96,16 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 			handle, decision, err := cfg.ConcurrencyController.Acquire(r.Context(), controlKey, cfg.ConcurrencyMaxWait)
 			logMetadata = appendConcurrencyMetadata(logMetadata, cfg, decision)
 			if err != nil {
-				slog.Warn(
-					"concurrency admission rejected",
-					"request_id", reqID,
-					"scope", cfg.ConcurrencyControlScope,
-					"key", controlKey,
-					"reason", decision.RejectReason,
-					"wait_ms", decision.WaitDuration.Milliseconds(),
-				)
+				if appLogSettings.Enabled(slog.LevelWarn) {
+					slog.Warn(
+						"concurrency admission rejected",
+						"request_id", reqID,
+						"scope", cfg.ConcurrencyControlScope,
+						"key", controlKey,
+						"reason", decision.RejectReason,
+						"wait_ms", decision.WaitDuration.Milliseconds(),
+					)
+				}
 				logRequest(logger, cfg, reqID, r, provider, logModelName, req.Stream, http.StatusTooManyRequests, start, string(bodyBytes), "", req.User, logMetadata, nil)
 				switch {
 				case errors.Is(err, ErrConcurrencyQueueFull):
@@ -109,7 +119,7 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 				}
 				return
 			}
-			if decision.Waited {
+			if decision.Waited && appLogSettings.Enabled(slog.LevelInfo) {
 				slog.Info(
 					"concurrency slot acquired after wait",
 					"request_id", reqID,
@@ -144,14 +154,18 @@ func handleChatCompletions(cfg *Config, logger *RequestLogger) http.HandlerFunc 
 					writeErrorJSON(w, http.StatusTooManyRequests, "daily token budget exceeded", "rate_limit_error")
 					return
 				default:
-					slog.Error("token budget check failed", "request_id", reqID, "error", err)
+					if appLogSettings.Enabled(slog.LevelError) {
+						slog.Error("token budget check failed", "request_id", reqID, "error", err)
+					}
 					writeErrorJSON(w, http.StatusBadGateway, "failed to check token budget", "server_error")
 					return
 				}
 			}
 		}
 
-		slog.Info("chat completions", "request_id", reqID, "provider", provider, "model", model, "stream", req.Stream)
+		if appLogSettings.Enabled(slog.LevelInfo) {
+			slog.Info("chat completions", "request_id", reqID, "provider", provider, "model", model, "stream", req.Stream)
+		}
 
 		switch provider {
 		case "openai":
@@ -491,12 +505,16 @@ func handleGeminiStream(w http.ResponseWriter, resp *http.Response, cfg *Config,
 }
 
 func logRequest(logger *RequestLogger, cfg *Config, reqID string, r *http.Request, provider, modelName string, stream bool, statusCode int, start time.Time, reqBody, respBody string, user string, metadata map[string]any, usage *OpenAIUsage) {
+	appLogSettings := appLogSettingsFromContext(r.Context(), cfg)
+
 	if cfg.TokenBudgetEnabled && cfg.TokenBudgetStore != nil && usage != nil && usage.TotalTokens > 0 && statusCode >= 200 && statusCode < 300 {
 		if appID, modelName, err := extractBudgetIdentifiers(metadata, modelName); err == nil {
 			ctx, cancel := context.WithTimeout(r.Context(), tokenBudgetUpdateTimeout)
 			defer cancel()
 			if err := cfg.TokenBudgetStore.AddUsage(ctx, appID, modelName, usage.TotalTokens, start); err != nil {
-				slog.Warn("failed to update token usage", "request_id", reqID, "error", err)
+				if appLogSettings.Enabled(slog.LevelWarn) {
+					slog.Warn("failed to update token usage", "request_id", reqID, "error", err)
+				}
 			}
 		}
 	}
@@ -520,10 +538,10 @@ func logRequest(logger *RequestLogger, cfg *Config, reqID string, r *http.Reques
 		entry.CompletionTokens = usage.CompletionTokens
 		entry.TotalTokens = usage.TotalTokens
 	}
-	if cfg.LogRequestBody {
+	if appLogSettings.LogRequestBody {
 		entry.ReqBody = reqBody
 	}
-	if cfg.LogResponseBody {
+	if appLogSettings.LogResponseBody {
 		entry.RespBody = respBody
 	}
 	logger.Log(entry)
