@@ -1,7 +1,7 @@
 gollmproxy
 *.log
-config.yaml
-config.yaml.*
-!config.yaml.example
+config.json
+config.json.*
+!config.json.example
 .env
 .env.*

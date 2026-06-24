@@ -7,28 +7,36 @@ import (
 	"time"
 )
 
-func TestLoadYAMLConfigKeepsPerModelNameOverrides(t *testing.T) {
+func TestLoadJSONConfigKeepsPerModelNameOverrides(t *testing.T) {
 	t.Setenv("AWS_REGION", "")
 	t.Setenv("AWS_DEFAULT_REGION", "")
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
-	configBody := []byte(`model_list:
-  - model_name: gpt-oss-20b-a
-    litellm_params:
-      model: bedrock/openai.gpt-oss-20b-1:0
-      region: ap-northeast-1
-  - model_name: gpt-oss-20b-b
-    litellm_params:
-      model: bedrock/openai.gpt-oss-20b-1:0
-      region: ap-northeast-3
-`)
+	configPath := filepath.Join(dir, "config.json")
+	configBody := []byte(`{
+  "model_list": [
+    {
+      "model_name": "gpt-oss-20b-a",
+      "proxy_params": {
+        "model": "bedrock/openai.gpt-oss-20b-1:0",
+        "region": "ap-northeast-1"
+      }
+    },
+    {
+      "model_name": "gpt-oss-20b-b",
+      "proxy_params": {
+        "model": "bedrock/openai.gpt-oss-20b-1:0",
+        "region": "ap-northeast-3"
+      }
+    }
+  ]
+}`)
 	if err := os.WriteFile(configPath, configBody, 0644); err != nil {
 		t.Fatalf("failed to write temp config: %v", err)
 	}
 
 	cfg := &Config{}
-	loadYAMLConfig(configPath, cfg)
+	loadJSONConfig(configPath, cfg)
 
 	if got := cfg.ModelAliases["gpt-oss-20b-a"]; got != "bedrock/openai.gpt-oss-20b-1:0" {
 		t.Fatalf("unexpected alias mapping for a: %q", got)
@@ -47,62 +55,77 @@ func TestLoadYAMLConfigKeepsPerModelNameOverrides(t *testing.T) {
 	}
 }
 
-func TestLoadYAMLConfigKeepsDirectModelOverridesWithoutAlias(t *testing.T) {
+func TestLoadJSONConfigKeepsDirectModelOverridesWithoutAlias(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
-	configBody := []byte(`model_list:
-  - litellm_params:
-      model: openai/gpt-4o
-      api_base: https://example.invalid
-`)
+	configPath := filepath.Join(dir, "config.json")
+	configBody := []byte(`{
+  "model_list": [
+    {
+      "proxy_params": {
+        "model": "openai/gpt-4o",
+        "api_base": "https://example.invalid"
+      }
+    }
+  ]
+}`)
 	if err := os.WriteFile(configPath, configBody, 0644); err != nil {
 		t.Fatalf("failed to write temp config: %v", err)
 	}
 
 	cfg := &Config{}
-	loadYAMLConfig(configPath, cfg)
+	loadJSONConfig(configPath, cfg)
 
 	if got := cfg.ModelConfigs["openai/gpt-4o"].APIBase; got != "https://example.invalid" {
 		t.Fatalf("unexpected direct model config: %q", got)
 	}
 }
 
-func TestLoadYAMLConfigStoresSearchProviderInModelConfig(t *testing.T) {
+func TestLoadJSONConfigStoresSearchProviderInModelConfig(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
-	configBody := []byte(`model_list:
-  - model_name: tavily-proxy
-    litellm_params:
-      model: openai/gpt-4o
-      search_provider: tavily
-`)
+	configPath := filepath.Join(dir, "config.json")
+	configBody := []byte(`{
+  "model_list": [
+    {
+      "model_name": "tavily-proxy",
+      "proxy_params": {
+        "model": "openai/gpt-4o",
+        "search_provider": "tavily"
+      }
+    }
+  ]
+}`)
 	if err := os.WriteFile(configPath, configBody, 0644); err != nil {
 		t.Fatalf("failed to write temp config: %v", err)
 	}
 
 	cfg := &Config{}
-	loadYAMLConfig(configPath, cfg)
+	loadJSONConfig(configPath, cfg)
 
 	if got := cfg.ModelConfigs["tavily-proxy"].SearchProvider; got != "tavily" {
 		t.Fatalf("unexpected search_provider: %q", got)
 	}
 }
 
-func TestLoadYAMLConfigStoresPerModelTimeout(t *testing.T) {
+func TestLoadJSONConfigStoresPerModelTimeout(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
-	configBody := []byte(`model_list:
-  - model_name: gpt-4o-fast
-    litellm_params:
-      model: openai/gpt-4o
-      timeout: 45s
-`)
+	configPath := filepath.Join(dir, "config.json")
+	configBody := []byte(`{
+  "model_list": [
+    {
+      "model_name": "gpt-4o-fast",
+      "proxy_params": {
+        "model": "openai/gpt-4o",
+        "timeout": "45s"
+      }
+    }
+  ]
+}`)
 	if err := os.WriteFile(configPath, configBody, 0644); err != nil {
 		t.Fatalf("failed to write temp config: %v", err)
 	}
 
 	cfg := &Config{}
-	loadYAMLConfig(configPath, cfg)
+	loadJSONConfig(configPath, cfg)
 
 	if got := cfg.ModelConfigs["gpt-4o-fast"].Timeout.String(); got != "45s" {
 		t.Fatalf("unexpected timeout: %q", got)
@@ -168,16 +191,18 @@ func TestBuildLogMetadataWhitelistCanExcludeFields(t *testing.T) {
 	}
 }
 
-func TestLoadYAMLConfigConcurrencyControlSettings(t *testing.T) {
+func TestLoadJSONConfigConcurrencyControlSettings(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
-	configBody := []byte(`general_settings:
-  concurrency_control_enabled: true
-  concurrency_control_scope: app_id+model_name
-  concurrency_control_max_concurrency: 3
-  concurrency_control_max_queue: 5
-  concurrency_control_max_wait: 7s
-`)
+	configPath := filepath.Join(dir, "config.json")
+	configBody := []byte(`{
+  "general_settings": {
+    "concurrency_control_enabled": true,
+    "concurrency_control_scope": "app_id+model_name",
+    "concurrency_control_max_concurrency": 3,
+    "concurrency_control_max_queue": 5,
+    "concurrency_control_max_wait": "7s"
+  }
+}`)
 	if err := os.WriteFile(configPath, configBody, 0644); err != nil {
 		t.Fatalf("failed to write temp config: %v", err)
 	}
@@ -188,7 +213,7 @@ func TestLoadYAMLConfigConcurrencyControlSettings(t *testing.T) {
 		ConcurrencyMaxQueue:       4,
 		ConcurrencyMaxWait:        3 * time.Second,
 	}
-	loadYAMLConfig(configPath, cfg)
+	loadJSONConfig(configPath, cfg)
 
 	if !cfg.ConcurrencyControlEnabled {
 		t.Fatalf("expected concurrency control enabled")

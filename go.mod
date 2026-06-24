@@ -13,7 +13,6 @@ require github.com/google/uuid v1.6.0
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.5
 	github.com/lib/pq v1.12.3
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

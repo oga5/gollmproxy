@@ -18,7 +18,7 @@ GEMINI_API_KEY="..." ./gollmproxy -port 9090
 
 ```
 main.go                       エントリーポイント (設定読込 → ロガー初期化 → サーバー起動)
-config.go                     Config構造体, 環境変数/YAML/フラグ読込
+config.go                     Config構造体, 環境変数/JSON/フラグ読込
 server.go                     HTTPサーバー, ルーティング登録, ミドルウェア (recovery, requestID, logging)
 log.go                        JSONL リクエストロガー (RequestLogger, LogEntry)
 proxy.go                      汎用HTTP転送 (forwardRequest), エラーレスポンスヘルパー
@@ -30,7 +30,7 @@ convert_gemini_to_openai.go   Gemini → OpenAI レスポンス変換 (非スト
 types_openai.go               OpenAI API 型定義 (Request, Response, StreamChunk, Error)
 types_gemini.go               Gemini API 型定義 (Request, Response, UsageMetadata)
 stream.go                     SSE ストリーミングユーティリティ (proxySSEStream)
-config.yaml.example           設定ファイル例
+config.json.example           設定ファイル例
 ```
 
 ## アーキテクチャ
@@ -98,44 +98,57 @@ recoveryMiddleware → requestIDMiddleware → loggingMiddleware → [authMiddle
 
 ## 設定ファイル形式
 
-```yaml
-general_settings:
-  master_key: os.environ/LITELLM_MASTER_KEY
-  litellm_key_header_name: X-Litellm-Api-Key
-  port: 8080
-  log_file: "gollmproxy.log"
-  required_metadata_keys:
-    - app_id
-    - user_id
-
-model_list:
-  - model_name: gpt-4o
-    litellm_params:
-      model: openai/gpt-4o
-      api_key: os.environ/OPENAI_API_KEY
-      api_base: https://api.openai.com
-  - model_name: gemini-flash
-    litellm_params:
-      model: gemini/gemini-2.5-flash
-      api_key: os.environ/GEMINI_API_KEY
-  - model_name: gpt-oss-20b
-    litellm_params:
-      model: bedrock/openai.gpt-oss-20b-1:0
-      region: ap-northeast-1
-
-search_tools:
-  - search_tool_name: tavily-search
-    litellm_params:
-      search_provider: tavily
-      api_key: os.environ/TAVILY_API_KEY
-
-google_ai_studio_passthrough:
-  api_key: os.environ/GEMINI_API_KEY
-
-environment_variables:
-  OPENAI_API_KEY: "sk-..."
-  GEMINI_API_KEY: "AIza..."
-  TAVILY_API_KEY: "tvly-..."
+```json
+{
+  "general_settings": {
+    "master_key": "os.environ/LITELLM_MASTER_KEY",
+    "litellm_key_header_name": "X-Litellm-Api-Key",
+    "port": 8080,
+    "log_file": "gollmproxy.log",
+    "required_metadata_keys": ["app_id", "user_id"]
+  },
+  "model_list": [
+    {
+      "model_name": "gpt-4o",
+      "proxy_params": {
+        "model": "openai/gpt-4o",
+        "api_key": "os.environ/OPENAI_API_KEY",
+        "api_base": "https://api.openai.com"
+      }
+    },
+    {
+      "model_name": "gemini-flash",
+      "proxy_params": {
+        "model": "gemini/gemini-2.5-flash",
+        "api_key": "os.environ/GEMINI_API_KEY"
+      }
+    },
+    {
+      "model_name": "gpt-oss-20b",
+      "proxy_params": {
+        "model": "bedrock/openai.gpt-oss-20b-1:0",
+        "region": "ap-northeast-1"
+      }
+    }
+  ],
+  "search_tools": [
+    {
+      "search_tool_name": "tavily-search",
+      "proxy_params": {
+        "search_provider": "tavily",
+        "api_key": "os.environ/TAVILY_API_KEY"
+      }
+    }
+  ],
+  "google_ai_studio_passthrough": {
+    "api_key": "os.environ/GEMINI_API_KEY"
+  },
+  "environment_variables": {
+    "OPENAI_API_KEY": "sk-...",
+    "GEMINI_API_KEY": "AIza...",
+    "TAVILY_API_KEY": "tvly-..."
+  }
+}
 ```
 
 - `general_settings`: ポート・ログファイル・マスターキー認証設定
@@ -143,19 +156,18 @@ environment_variables:
   - `litellm_key_header_name`: 認証ヘッダ名（未設定時は `Authorization`）
   - `bedrock_include_reasoning`: Bedrock 応答中の `<reasoning>...</reasoning>` を返すか（デフォルト: false）
   - `required_metadata_keys`: `/v1/chat/completions` リクエストの `metadata` フィールドで必須とするキーのリスト。指定したキーが存在しないまたは空の場合は HTTP 400 を返す
-- `model_list`: `litellm_params.model` のプレフィックス (`openai/`, `gemini/`, `ollama_chat/`, `bedrock/`) でプロバイダ判定。`api_base` はモデル毎に設定可能。Bedrock は `region` を利用
+- `model_list`: `proxy_params.model` のプレフィックス (`openai/`, `gemini/`, `ollama_chat/`, `bedrock/`) でプロバイダ判定。`api_base` はモデル毎に設定可能。Bedrock は `region` を利用
 - `search_tools`: 検索ツール設定（Tavily等）。`search_provider` でプロバイダ判定
 - `google_ai_studio_passthrough`: Geminiパススルー用APIキー設定
-- `environment_variables`: YAMLからOS環境変数をセット（既存の環境変数が優先）
+- `environment_variables`: JSONからOS環境変数をセット（既存の環境変数が優先）
 - `os.environ/VARNAME`: 環境変数参照構文（api_key等で使用）
 
 ## 設定の優先順位
 
-環境変数 (OS) > YAML設定ファイル (model_list / environment_variables) > コマンドラインフラグ > デフォルト値
+環境変数 (OS) > JSON設定ファイル (model_list / environment_variables) > コマンドラインフラグ > デフォルト値
 
 ## 依存関係
 
-- `gopkg.in/yaml.v3` - YAML設定ファイルパース
 - `github.com/google/uuid` - リクエストID生成
 - `github.com/aws/aws-sdk-go-v2/config` - AWS認証情報・リージョン解決
 - `github.com/aws/aws-sdk-go-v2/service/bedrockruntime` - Bedrock Runtime InvokeModel
