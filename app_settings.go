@@ -10,8 +10,7 @@ import (
 )
 
 const (
-	defaultAppLogLevel  = "info"
-	appSettingsCacheTTL = 30 * time.Second
+	defaultAppLogLevel = "info"
 )
 
 const appLogSettingsKey contextKey = "app_log_settings"
@@ -50,7 +49,7 @@ type PostgresAppSettingsStore struct {
 	cache map[string]cachedAppSettings
 }
 
-func NewPostgresAppSettingsStore(dsn string) (*PostgresAppSettingsStore, error) {
+func NewPostgresAppSettingsStore(dsn string, ttl time.Duration) (*PostgresAppSettingsStore, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, err
@@ -62,7 +61,7 @@ func NewPostgresAppSettingsStore(dsn string) (*PostgresAppSettingsStore, error) 
 
 	store := &PostgresAppSettingsStore{
 		db:    db,
-		ttl:   appSettingsCacheTTL,
+		ttl:   ttl,
 		cache: make(map[string]cachedAppSettings),
 	}
 	if err := store.ensureSchema(); err != nil {
@@ -100,9 +99,11 @@ func (s *PostgresAppSettingsStore) Get(ctx context.Context, appID string) (AppSe
 	defer s.mu.Unlock()
 
 	now := time.Now()
-	cached, ok := s.cache[appID]
-	if ok && now.Before(cached.expiresAt) {
-		return cached.settings, cached.found, nil
+	if s.ttl > 0 {
+		cached, ok := s.cache[appID]
+		if ok && now.Before(cached.expiresAt) {
+			return cached.settings, cached.found, nil
+		}
 	}
 
 	const q = `
@@ -117,10 +118,12 @@ WHERE app_id = $1`
 	)
 	err := s.db.QueryRowContext(ctx, q, appID).Scan(&logLevel, &logRequestBody, &logResponseBody)
 	if err == sql.ErrNoRows {
-		s.cache[appID] = cachedAppSettings{
-			settings:  AppSettings{},
-			found:     false,
-			expiresAt: now.Add(s.ttl),
+		if s.ttl > 0 {
+			s.cache[appID] = cachedAppSettings{
+				settings:  AppSettings{},
+				found:     false,
+				expiresAt: now.Add(s.ttl),
+			}
 		}
 		return AppSettings{}, false, nil
 	}
@@ -140,10 +143,12 @@ WHERE app_id = $1`
 		settings.LogResponseBody = &v
 	}
 
-	s.cache[appID] = cachedAppSettings{
-		settings:  settings,
-		found:     true,
-		expiresAt: now.Add(s.ttl),
+	if s.ttl > 0 {
+		s.cache[appID] = cachedAppSettings{
+			settings:  settings,
+			found:     true,
+			expiresAt: now.Add(s.ttl),
+		}
 	}
 	return settings, true, nil
 }

@@ -26,7 +26,7 @@ func main() {
 		logger.AttachPostgresLogger(pg)
 		slog.Info("postgres request logging enabled")
 
-		appSettingsStore, err := NewPostgresAppSettingsStore(cfg.PostgresDSN)
+		appSettingsStore, err := NewPostgresAppSettingsStore(cfg.PostgresDSN, cfg.AppSettingsCacheTTL)
 		if err != nil {
 			slog.Error("failed to connect to postgres for app settings", "error", err)
 			os.Exit(1)
@@ -41,7 +41,7 @@ func main() {
 			slog.Error("token budget enabled but postgres_dsn is not configured")
 			os.Exit(1)
 		}
-		tokenBudgetStore, err := NewPostgresTokenBudgetStore(cfg.PostgresDSN)
+		tokenBudgetStore, err := NewPostgresTokenBudgetStore(cfg.PostgresDSN, cfg.TokenBudgetCacheTTL)
 		if err != nil {
 			slog.Error("failed to connect to postgres for token budget", "error", err)
 			os.Exit(1)

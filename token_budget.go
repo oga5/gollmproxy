@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/lib/pq" // registers postgres driver
@@ -25,11 +26,20 @@ type TokenBudgetStore interface {
 	AddUsage(ctx context.Context, appID, modelName string, tokens int, day time.Time) error
 }
 
-type PostgresTokenBudgetStore struct {
-	db *sql.DB
+type cachedBudget struct {
+	tokensPerDay int64
+	found        bool
+	expiresAt    time.Time
 }
 
-func NewPostgresTokenBudgetStore(dsn string) (*PostgresTokenBudgetStore, error) {
+type PostgresTokenBudgetStore struct {
+	db    *sql.DB
+	ttl   time.Duration
+	mu    sync.RWMutex
+	cache map[string]cachedBudget
+}
+
+func NewPostgresTokenBudgetStore(dsn string, ttl time.Duration) (*PostgresTokenBudgetStore, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, err
@@ -39,7 +49,11 @@ func NewPostgresTokenBudgetStore(dsn string) (*PostgresTokenBudgetStore, error) 
 		return nil, err
 	}
 
-	store := &PostgresTokenBudgetStore{db: db}
+	store := &PostgresTokenBudgetStore{
+		db:    db,
+		ttl:   ttl,
+		cache: make(map[string]cachedBudget),
+	}
 	if err := store.ensureSchema(); err != nil {
 		db.Close()
 		return nil, err
@@ -87,22 +101,15 @@ func (s *PostgresTokenBudgetStore) CheckAllowed(ctx context.Context, appID, mode
 		return ErrBudgetIdentifiersRequired
 	}
 
-	const q = `
-SELECT b.tokens_per_day, COALESCE(u.token, 0)
-FROM token_budgets b
-LEFT JOIN token_usage_daily u
-  ON u.app_id = b.app_id
- AND u.model_name = b.model_name
- AND u.usage_date = $3
-WHERE b.app_id = $1
-  AND b.model_name = $2`
-
-	usageDate := day.UTC().Format(dailyUsageDateFormat)
-	var budget, used int64
-	err := s.db.QueryRowContext(ctx, q, appID, modelName, usageDate).Scan(&budget, &used)
-	if errors.Is(err, sql.ErrNoRows) {
+	budget, found, err := s.getBudget(ctx, appID, modelName)
+	if err != nil {
+		return err
+	}
+	if !found {
 		return ErrBudgetNotConfigured
 	}
+
+	used, err := s.getTodayUsage(ctx, appID, modelName, day)
 	if err != nil {
 		return err
 	}
@@ -110,6 +117,58 @@ WHERE b.app_id = $1
 		return ErrBudgetExceeded
 	}
 	return nil
+}
+
+// getBudget returns the daily token budget for (appID, modelName).
+// Results are cached with the configured TTL. A missing row (not found) is
+// also cached as a negative entry so repeated misses avoid DB round-trips.
+func (s *PostgresTokenBudgetStore) getBudget(ctx context.Context, appID, modelName string) (int64, bool, error) {
+	key := appID + "\x00" + modelName
+	now := time.Now()
+
+	if s.ttl > 0 {
+		s.mu.RLock()
+		entry, ok := s.cache[key]
+		s.mu.RUnlock()
+		if ok && now.Before(entry.expiresAt) {
+			return entry.tokensPerDay, entry.found, nil
+		}
+	}
+
+	const q = `SELECT tokens_per_day FROM token_budgets WHERE app_id = $1 AND model_name = $2`
+	var budget int64
+	err := s.db.QueryRowContext(ctx, q, appID, modelName).Scan(&budget)
+	if errors.Is(err, sql.ErrNoRows) {
+		if s.ttl > 0 {
+			s.mu.Lock()
+			s.cache[key] = cachedBudget{found: false, expiresAt: now.Add(s.ttl)}
+			s.mu.Unlock()
+		}
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+
+	if s.ttl > 0 {
+		s.mu.Lock()
+		s.cache[key] = cachedBudget{tokensPerDay: budget, found: true, expiresAt: now.Add(s.ttl)}
+		s.mu.Unlock()
+	}
+	return budget, true, nil
+}
+
+// getTodayUsage returns the current day's token usage from token_usage_daily.
+// This is never cached so that usage counts are always up to date.
+func (s *PostgresTokenBudgetStore) getTodayUsage(ctx context.Context, appID, modelName string, day time.Time) (int64, error) {
+	const q = `SELECT COALESCE(token, 0) FROM token_usage_daily WHERE usage_date = $1 AND app_id = $2 AND model_name = $3`
+	usageDate := day.UTC().Format(dailyUsageDateFormat)
+	var used int64
+	err := s.db.QueryRowContext(ctx, q, usageDate, appID, modelName).Scan(&used)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return used, err
 }
 
 func (s *PostgresTokenBudgetStore) AddUsage(ctx context.Context, appID, modelName string, tokens int, day time.Time) error {

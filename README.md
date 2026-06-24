@@ -267,6 +267,8 @@ curl http://localhost:8080/health
   - `concurrency_control_max_wait`: 待機タイムアウト（Goのduration形式、デフォルト: `3s`）
   - `bedrock_include_reasoning`: Bedrock 応答中の `<reasoning>...</reasoning>` をそのまま返すか。未設定時は `false`
   - `required_metadata_keys`: `/v1/chat/completions` の `metadata` フィールドで必須とするキーのリスト。指定したキーが存在しないまたは空の場合は HTTP 400 を返す
+  - `app_settings_cache_ttl`: `app_settings` テーブルの取得結果をメモリキャッシュする期間（Goのduration形式、デフォルト: `30s`）。`0s` 以下に設定するとキャッシュ無効（毎リクエストDB参照）になる
+  - `token_budget_cache_ttl`: `token_budgets` テーブルの取得結果をメモリキャッシュする期間（Goのduration形式、デフォルト: `30s`）。`0s` 以下に設定するとキャッシュ無効。`token_usage_daily`（当日使用量）はこの設定に関わらず常にDBから読む
 - `model_list`: `proxy_params.model` のプレフィックス (`openai/`, `gemini/`, `bedrock/`, `bedrock_openai/`) でプロバイダ判定
 - `model_list.proxy_params.timeout`: モデル単位の非ストリーミング上流タイムアウト（Goのduration形式）。未設定時は `general_settings.upstream_non_stream_timeout` を使用
 - Bedrock 利用時 (`bedrock/`, `bedrock_openai/` 共通) は `proxy_params.region` を優先し、未指定なら `AWS_REGION` または `AWS_DEFAULT_REGION` を利用。`bedrock_openai/` は `api_base` でエンドポイントURLを上書き可能
@@ -293,6 +295,15 @@ curl http://localhost:8080/health
 予算はソフトリミットで、invoke 後に `usage.total_tokens` を `token_usage_daily` へ upsert 加算するため、1リクエストで予算超過することは許容される。
 また、同一 `app_id/model_name` への同時リクエストが複数ある場合、事前チェックが同時に通過して超過量が大きくなる可能性がある。
 厳密な上限制御が必要な場合は、DBロック（例: advisory lock）や更新時の競合制御を追加する運用を推奨。
+
+#### キャッシュ動作
+
+`token_budgets` テーブルの予算値（`tokens_per_day`）は `token_budget_cache_ttl` の期間メモリキャッシュされる（デフォルト: 30秒）。
+
+- キャッシュヒット時はDBを参照しない（未設定行のネガティブキャッシュも有効）
+- TTL超過後は次回リクエスト時にDBから再取得する
+- `0s` 以下に設定するとキャッシュ無効となり、毎リクエストDBから取得する
+- `token_usage_daily`（当日使用量）はキャッシュされず、常にDBから最新値を読む
 
 ### 同時実行数制御（キー単位）
 
@@ -347,6 +358,7 @@ CREATE TABLE app_settings (
 - `log_request_body`: リクエスト本文ログの ON/OFF を上書き
 - `log_response_body`: レスポンス本文ログの ON/OFF を上書き
 - レコードが存在しない app_id はグローバル設定を使う
+- 取得結果は `app_settings_cache_ttl` の期間メモリキャッシュされる（デフォルト: 30秒）。未設定行のネガティブキャッシュも有効。`0s` 以下でキャッシュ無効
 
 ### 認証
 
