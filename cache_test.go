@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"sync"
 	"testing"
@@ -227,7 +226,7 @@ func newCallTrackingDB() *callTrackingTokenBudgetDB {
 }
 
 func (db *callTrackingTokenBudgetDB) key(appID, modelName string) string {
-	return appID + "\x00" + modelName
+	return budgetCacheKey(appID, modelName)
 }
 
 func (db *callTrackingTokenBudgetDB) getBudget(_ context.Context, appID, modelName string) (int64, bool, error) {
@@ -264,7 +263,7 @@ func newCachingTokenBudgetStore(db *callTrackingTokenBudgetDB, ttl time.Duration
 }
 
 func (s *cachingTokenBudgetStore) getBudgetCached(ctx context.Context, appID, modelName string) (int64, bool, error) {
-	key := appID + "\x00" + modelName
+	key := budgetCacheKey(appID, modelName)
 	now := time.Now()
 
 	if s.ttl > 0 {
@@ -471,6 +470,3 @@ func TestConfigNegativeTTLMeansDisabled(t *testing.T) {
 		t.Fatalf("expected 2 budget DB calls with negative TTL, got %d", db.budgetCalls)
 	}
 }
-
-// Ensure sql package is imported (used by sql.ErrNoRows reference above).
-var _ = sql.ErrNoRows

@@ -119,11 +119,18 @@ func (s *PostgresTokenBudgetStore) CheckAllowed(ctx context.Context, appID, mode
 	return nil
 }
 
+// budgetCacheKey returns the map key used for (appID, modelName) pairs in the
+// budget cache. A null-byte separator is used because neither field may contain
+// null bytes in practice, ensuring the key is unique.
+func budgetCacheKey(appID, modelName string) string {
+	return appID + "\x00" + modelName
+}
+
 // getBudget returns the daily token budget for (appID, modelName).
 // Results are cached with the configured TTL. A missing row (not found) is
 // also cached as a negative entry so repeated misses avoid DB round-trips.
 func (s *PostgresTokenBudgetStore) getBudget(ctx context.Context, appID, modelName string) (int64, bool, error) {
-	key := appID + "\x00" + modelName
+	key := budgetCacheKey(appID, modelName)
 	now := time.Now()
 
 	if s.ttl > 0 {
